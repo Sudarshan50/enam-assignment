@@ -101,11 +101,14 @@ type PriceMoveDef = Extract<AlertRuleDefinition, { type: "price_move" }>;
 type VolumeSpikeDef = Extract<AlertRuleDefinition, { type: "volume_spike" }>;
 type CategoryDef = Extract<AlertRuleDefinition, { type: "category" }>;
 
+/** Absorbs float error so an exact move fires its rule (₹3 -> ₹2.85 computes as -4.999999999999993%). */
+const THRESHOLD_EPSILON = 1e-9;
+
 function priceMove(ruleId: string, def: PriceMoveDef, snap: PriceSnapshot): AlertDraft | null {
   const pct = changePct(snap);
   if (pct == null) return null;
-  const hit =
-    def.direction === "up" ? pct >= def.thresholdPct : def.direction === "down" ? pct <= -def.thresholdPct : Math.abs(pct) >= def.thresholdPct;
+  const threshold = def.thresholdPct - THRESHOLD_EPSILON;
+  const hit = def.direction === "up" ? pct >= threshold : def.direction === "down" ? pct <= -threshold : Math.abs(pct) >= threshold;
   if (!hit) return null;
   return {
     ruleId,

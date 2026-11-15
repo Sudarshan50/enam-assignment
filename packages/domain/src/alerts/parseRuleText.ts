@@ -84,7 +84,7 @@ export function parseRuleText(text: string, ctx: ParseRuleContext = {}): AlertRu
   const scope = parseScope(original, ctx);
   let candidate: unknown = null;
 
-  const multiple = parseNumber(/(\d+(?:\.\d+)?)\s*(?:x|×|times)\b/i, original);
+  const multiple = parseNumber(/(\d+(?:\.\d+)?)\s*(?:x\b|×|times\b)/i, original);
   const pct = parseNumber(/(\d+(?:\.\d+)?)\s*(?:%|percent|per cent|pc\b)/i, original);
 
   if (/\bvol(ume)?\b/i.test(original) || (multiple != null && pct == null)) {
