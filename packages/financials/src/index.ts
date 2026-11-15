@@ -1,0 +1,12 @@
+export * from "./types";
+export { parseIntegratedXbrl, XbrlParseError, type ParseXbrlOptions } from "./xbrl/parse";
+export { readXbrlDocument, CORE_CONTEXTS, type XbrlDocument, type ContextPeriod } from "./xbrl/document";
+export { detectTaxonomy, type TaxonomyInfo } from "./xbrl/family";
+export type { MetricStrategy, MarginSpec } from "./metrics/strategy";
+export { strategyFor, quarterMetrics, type StrategyResolver } from "./metrics/registry";
+export { industrialStrategy } from "./metrics/industrial";
+export { bankingStrategy } from "./metrics/banking";
+export { nbfcStrategy } from "./metrics/nbfc";
+export { IDENTITY_TOLERANCE_PCT, durationContexts } from "./metrics/facts";
+export * from "./results/periods";
+export { buildResultsCard, createResultsCardBuilder, notFiledResultsCard, ResultsCardInputError } from "./results/buildResultsCard";

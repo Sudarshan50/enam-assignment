@@ -2,6 +2,9 @@ import type { ResultsCard, StatementFamily } from "@finn/shared";
 
 export type XbrlContext = "OneD" | "FourD" | "OneI" | "PY_I";
 
+/** OneD is the quarter, FourD the year-to-date. They overlap and must never be summed. */
+export type DurationContext = "OneD" | "FourD";
+
 export interface XbrlFact {
   /** Local concept name without the namespace prefix, e.g. "RevenueFromOperations". */
   concept: string;
@@ -25,6 +28,10 @@ export interface ParsedFiling {
   facts: XbrlFact[];
   /** Facts by context then concept, for quick lookup. */
   byContext: Record<XbrlContext, Record<string, number>>;
+  /** SEBI taxonomy, e.g. "IntegratedFinance_IndAS/2026-01-31". */
+  taxonomy?: string;
+  symbol?: string | null;
+  companyName?: string | null;
 }
 
 export type HeadlineMetricKey =
@@ -32,6 +39,7 @@ export type HeadlineMetricKey =
   | "ebitda"
   | "pbt"
   | "pat"
+  | "pat_owners"
   | "nii"
   | "ppop"
   | "provisions"
@@ -66,6 +74,9 @@ export interface BuildResultsCardInput {
   previousQuarter: ParsedFiling | null;
   yearAgoQuarter: ParsedFiling | null;
   sourceRef: string;
+  /** Provenance refs for the comparison filings (e.g. their XBRL URLs or seq ids). */
+  previousQuarterRef?: string;
+  yearAgoQuarterRef?: string;
 }
 
 export type BuildResultsCard = (input: BuildResultsCardInput) => ResultsCard;
