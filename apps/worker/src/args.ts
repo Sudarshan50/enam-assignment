@@ -81,7 +81,9 @@ export function argInt(args: CommandArgs, key: string, fallback: number): number
 export function argIsoDate(args: CommandArgs, key: string): string | undefined {
   const v = argString(args, key);
   if (v === undefined) return undefined;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(`${v}T00:00:00Z`))) throw new UsageError(`--${key} must be YYYY-MM-DD`);
+  const ms = /^\d{4}-\d{2}-\d{2}$/.test(v) ? Date.parse(`${v}T00:00:00Z`) : Number.NaN;
+  // Date.parse rolls impossible days over (2026-02-30 -> 2026-03-02), so require a round trip.
+  if (Number.isNaN(ms) || new Date(ms).toISOString().slice(0, 10) !== v) throw new UsageError(`--${key} must be YYYY-MM-DD`);
   return v;
 }
 
