@@ -59,7 +59,7 @@ export async function runModules(opts: {
       }
       if (!result) {
         result = await runner.run(ctx);
-        if (!(result.status === "done" && result.cacheable === false)) {
+        if (!(result.status === "done" && result.incomplete)) {
           await repo.putModuleCache({
             cacheKey,
             symbol: ctx.symbol,
@@ -73,7 +73,10 @@ export async function runModules(opts: {
       if (result.status === "done") {
         await repo.upsertModule(runId, key, "done", { payload: result.payload, cacheKey });
         await repo.addEvent(runId, "module.completed", `${LABELS[key]} ready`, { key, status: "done", cached, ms: Date.now() - started });
+        if (result.incomplete) await repo.scheduleModuleRetry({ symbol: ctx.symbol, module: key, runId, reason: result.incomplete });
+        else await repo.resolveModuleRetry(ctx.symbol, key);
       } else {
+        await repo.resolveModuleRetry(ctx.symbol, key);
         await repo.upsertModule(runId, key, "insufficient_sources", { cacheKey, error: result.reason });
         await repo.addEvent(runId, "module.completed", `${LABELS[key]}: not enough source material`, {
           key,
@@ -87,6 +90,7 @@ export async function runModules(opts: {
       const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
       await repo.upsertModule(runId, key, "failed", { error: message.slice(0, 500) });
       await repo.addEvent(runId, "module.failed", `${LABELS[key]} failed`, { key, error: message.slice(0, 300) });
+      await repo.scheduleModuleRetry({ symbol: ctx.symbol, module: key, runId, reason: message });
       return { key, status: "failed", cached: false, error: message };
     }
   });

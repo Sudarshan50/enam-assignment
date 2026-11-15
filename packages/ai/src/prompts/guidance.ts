@@ -9,26 +9,26 @@ export const EXTRACTOR_VERSION = 3;
 export const MAX_ITEMS = 30;
 export const TASK = "guidance_extract";
 
-export const GuidanceExtractionSchema = z.object({
-  items: z.array(
-    z.object({
-      metric: z.enum(GUIDANCE_METRICS),
-      statementType: z.enum(["explicit_guidance", "target", "aspiration"]),
-      bound: z.enum(["point", "range", "at_least", "at_most"]),
-      low: z.number().nullable(),
-      high: z.number().nullable(),
-      unit: z.enum(["pct", "inr_crore", "x"]),
-      horizon: z.string(),
-      scope: z.enum(["consolidated", "segment"]),
-      segment: z.string().nullable(),
-      speaker: z.string().nullable(),
-      withdrawn: z.boolean(),
-      sourceId: z.string(),
-      quote: z.string(),
-    }),
-  ),
+export const GuidanceItemSchema = z.object({
+  metric: z.enum(GUIDANCE_METRICS),
+  statementType: z.enum(["explicit_guidance", "target", "aspiration"]),
+  bound: z.enum(["point", "range", "at_least", "at_most"]),
+  low: z.number().nullable(),
+  high: z.number().nullable(),
+  unit: z.enum(["pct", "inr_crore", "x"]),
+  horizon: z.string(),
+  scope: z.enum(["consolidated", "segment"]),
+  segment: z.string().nullable(),
+  speaker: z.string().nullable(),
+  withdrawn: z.boolean(),
+  sourceId: z.string(),
+  quote: z.string(),
 });
+/** Sent to the model as the JSON schema it must follow. */
+export const GuidanceExtractionSchema = z.object({ items: z.array(GuidanceItemSchema) });
 export type GuidanceExtraction = z.infer<typeof GuidanceExtractionSchema>;
+/** What a reply must satisfy to be accepted; items are then validated one by one, so one bad item costs only itself. */
+export const GuidanceReplySchema = z.object({ items: z.array(z.unknown()) });
 
 export const SYSTEM = [
   "You extract forward-looking quantitative guidance from an Indian company's earnings-call transcript.",

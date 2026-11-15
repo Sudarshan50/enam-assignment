@@ -4,7 +4,7 @@ import { extractNumbers, numberSupported, type ExtractedNumber, type NumberDimen
 import { quoteInText, type SourceChunk } from "../citations/validator";
 import * as prompt from "../prompts/guidance";
 import { buildSourcesBlock } from "../prompts/sources";
-import { toStrictJsonSchema } from "../util/schema";
+import { formatZodError, toStrictJsonSchema } from "../util/schema";
 import { parseFiscalLabel } from "./periods";
 
 export interface TranscriptForExtraction {
@@ -88,14 +88,21 @@ export async function extractGuidance(deps: { llm: LlmPort }, t: TranscriptForEx
       system: prompt.SYSTEM,
       user: prompt.buildUser(t.companyName, t.symbol, t.label, t.callDate, sources.block),
       jsonSchema: toStrictJsonSchema(prompt.GuidanceExtractionSchema),
-      parse: (v) => prompt.GuidanceExtractionSchema.parse(v),
+      parse: (v) => prompt.GuidanceReplySchema.parse(v),
       ref: { kind: "document", id: t.documentId },
       maxTokens: 6_000,
     });
 
     const byId = new Map(batch.map((c) => [c.chunkId, c] as const));
-    for (const raw of res.items) {
+    for (const item of res.items) {
       stats.proposed++;
+      const parsed = prompt.GuidanceItemSchema.safeParse(item);
+      if (!parsed.success) {
+        const quote = typeof (item as { quote?: unknown } | null)?.quote === "string" ? (item as { quote: string }).quote : "";
+        stats.rejected.push({ reason: `malformed item (${formatZodError(parsed.error)})`, quote });
+        continue;
+      }
+      const raw = parsed.data;
       const chunk = byId.get(sources.resolve(raw.sourceId));
       if (!chunk) {
         stats.rejected.push({ reason: `unknown source ${raw.sourceId}`, quote: raw.quote });

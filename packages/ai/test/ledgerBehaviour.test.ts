@@ -249,6 +249,19 @@ describe("extractGuidance", () => {
     expect(items[3]!.withdrawn).toBe(true);
   });
 
+  it("rejects a malformed item on its own and keeps the rest of the reply", async () => {
+    const llm = fakeLlm({
+      guidance_extract: () => ({ items: [{ ...proposal[3], scope: "group" }, proposal[0], null, "FY27 revenue growth 15-18%", { ...proposal[2], low: "16%" }] }),
+    });
+    const { items, stats } = await extractGuidance({ llm }, transcript);
+    expect(items.map((i) => [i.metric, i.horizonLabel])).toEqual([["revenue_growth", "FY27"]]);
+    expect(stats).toMatchObject({ proposed: 5, kept: 1 });
+    expect(stats.rejected).toHaveLength(4);
+    expect(stats.rejected.every((r) => r.reason.startsWith("malformed item ("))).toBe(true);
+    expect(stats.rejected[0]).toMatchObject({ reason: expect.stringContaining("scope"), quote: "We are withdrawing our FY27 volume guidance." });
+    expect(stats.rejected[3]!.reason).toContain("low");
+  });
+
   it("requires each guided number in the quote, in a compatible unit and scale", async () => {
     const c = chunk(
       "chunk-n",

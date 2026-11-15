@@ -273,6 +273,9 @@ describe.skipIf(!reachable)("research runs repository", () => {
       expect(rows.bull_bear).toMatchObject({ status: "failed", error: "TypeError: model returned garbage", payload: null });
       expect(rows.cash_quality).toMatchObject({ status: "insufficient_sources", error: "Fewer than 3 years of cash flows" });
       expect(rows.promise_ledger).toMatchObject({ status: "done", payload: { key: "promise_ledger" } });
+      expect(await repo.getModuleRetry(S.RMOD, "bull_bear")).toMatchObject({ status: "pending", run_id: runId, attempts: 0, reason: "TypeError: model returned garbage" });
+      expect(await repo.getModuleRetry(S.RMOD, "promise_ledger")).toBeNull();
+      expect(await repo.getModuleRetry(S.RMOD, "cash_quality")).toBeNull();
 
       const evs = await events(runId);
       for (const key of KEYS) {
@@ -298,8 +301,9 @@ describe.skipIf(!reachable)("research runs repository", () => {
       await park(runId);
     });
 
-    it("shows a result marked not cacheable but computes it again on the next run", async () => {
-      const incomplete = { promise_ledger: async () => ({ status: "done" as const, payload: { key: "promise_ledger", partial: true }, cacheable: false as const }) };
+    it("shows an incomplete result and schedules its retry, but computes it again on the next run", async () => {
+      const reason = "Could not read Q1 FY27 concall: response cut off";
+      const incomplete = { promise_ledger: async () => ({ status: "done" as const, payload: { key: "promise_ledger", partial: true }, incomplete: reason }) };
       const keys: ModuleKey[] = ["promise_ledger", "financial_snapshot"];
       for (const expected of [["financial_snapshot", "promise_ledger"], ["promise_ledger"]]) {
         const runId = await newRun();
@@ -309,6 +313,7 @@ describe.skipIf(!reachable)("research runs repository", () => {
         expect(out.find((o) => o.key === "promise_ledger")).toMatchObject({ status: "done", cached: false });
         const rows = Object.fromEntries((await repo.listModules(runId)).map((r) => [r.module, r]));
         expect(rows.promise_ledger).toMatchObject({ status: "done", payload: { key: "promise_ledger", partial: true } });
+        expect(await repo.getModuleRetry(S.RMOD, "promise_ledger")).toMatchObject({ status: "pending", run_id: runId, attempts: 0, reason });
         await park(runId);
       }
     });
@@ -323,6 +328,7 @@ describe.skipIf(!reachable)("research runs repository", () => {
         const out = await runModules({ runId, keys: ["promise_ledger", "bull_bear"], registry: reg, ctx: ctx(runId), repo, model, useCache });
         expect(calls.sort()).toEqual(["bull_bear", "promise_ledger"]);
         expect(out.every((o) => !o.cached && o.status === "done")).toBe(true);
+        for (const key of ["bull_bear", "promise_ledger"]) expect((await repo.getModuleRetry(S.RMOD, key))?.status).toBe("resolved");
         await park(runId);
       }
     });

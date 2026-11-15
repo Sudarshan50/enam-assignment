@@ -6,7 +6,7 @@ import type { z } from "zod";
 import { normaliseForMatch, type SourceChunk } from "../citations/validator";
 import { createHistoryActuals } from "../ledger/actuals";
 import { extractGuidance } from "../ledger/extract";
-import { LlmValidationError } from "../llm/errors";
+import { BudgetExceededError, LlmTransportError, LlmUnavailableError, LlmValidationError } from "../llm/errors";
 import { matchGuidance, summariseLedger, type LedgerItem } from "../ledger/match";
 import { EXTRACTOR_VERSION } from "../prompts/guidance";
 import { mapWithConcurrency } from "../util/concurrency";
@@ -17,6 +17,9 @@ type Payload = z.infer<typeof PromiseLedgerPayloadSchema>;
 export const MAX_TRANSCRIPTS = 8;
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
+
+const isLlmError = (err: unknown): err is Error =>
+  err instanceof LlmValidationError || err instanceof LlmTransportError || err instanceof LlmUnavailableError || err instanceof BudgetExceededError;
 
 /** Chunk index first, then the quote's offset in the chunk; chunks are far shorter than this. */
 const CHUNK_STRIDE = 1_000_000;
@@ -57,9 +60,9 @@ export const promiseLedgerModule: ResearchModuleRunner = {
     const docs = documentsRepo(ctx.sql);
     const guidance = guidanceRepo(ctx.sql);
     const chunkById = new Map<string, { index: number; text: string }>();
-    const unread: { id: string; label: string; error: LlmValidationError }[] = [];
+    type Transcript = (typeof transcripts)[number];
 
-    await mapWithConcurrency(transcripts, 4, async (t) => {
+    const extractOne = async (t: Transcript): Promise<Error | null> => {
       const [rows, pages] = await Promise.all([chunks.listForDocument(t.id), docs.pages(t.id)]);
       for (const c of rows) chunkById.set(c.id, { index: c.chunk_index, text: c.text });
       const sourceChunks: SourceChunk[] = rows.map((c) => ({
@@ -79,20 +82,34 @@ export const promiseLedgerModule: ResearchModuleRunner = {
         );
         await guidance.replaceForDocument(t.id, items);
         ctx.log?.("guidance extracted", { document: t.label, proposed: stats.proposed, kept: stats.kept, rejected: stats.rejected.length });
+        return null;
       } catch (err) {
-        // One unusable reply loses that call, not the ledger; its earlier extraction (if any) stays in place.
-        if (!(err instanceof LlmValidationError)) throw err;
-        unread.push({ id: t.id, label: t.label, error: err });
+        // A model failure loses that call, not the ledger; its earlier extraction (if any) stays in place.
+        if (!isLlmError(err)) throw err;
         ctx.log?.("guidance extraction failed", { document: t.label, error: err.message });
+        return err;
       }
-    });
+    };
+
+    const firstPass = await mapWithConcurrency(transcripts, 4, async (t) => ({ t, error: await extractOne(t) }));
+    let unread = firstPass.filter((r): r is { t: Transcript; error: Error } => r.error !== null);
+    // Replies vary between attempts, so calls that failed get one more, one at a time; a spent budget or an open
+    // circuit would fail again immediately, so those wait for the retry queue instead.
+    if (unread.length > 0 && !unread.some((u) => u.error instanceof BudgetExceededError || u.error instanceof LlmUnavailableError)) {
+      const second: typeof unread = [];
+      for (const u of unread) {
+        const error = await extractOne(u.t);
+        if (error) second.push({ t: u.t, error });
+      }
+      unread = second;
+    }
     if (unread.length === transcripts.length) throw unread[0]!.error;
 
     const transcriptIds = new Set(transcripts.map((t) => t.id));
     const rows = (await guidance.listBySymbol(ctx.symbol)).filter((r) => transcriptIds.has(r.document_id));
     const rowById = new Map(rows.map((r) => [r.id, r] as const));
     const withItems = new Set(rows.map((r) => r.document_id));
-    const missing = new Set(unread.filter((u) => !withItems.has(u.id)).map((u) => u.id));
+    const missing = new Set(unread.filter((u) => !withItems.has(u.t.id)).map((u) => u.t.id));
     // A call that was never read is left out, so its silence does not count as dropping earlier guidance.
     const read = transcripts.filter((t) => !missing.has(t.id));
     const entries = matchGuidance({
@@ -155,7 +172,7 @@ export const promiseLedgerModule: ResearchModuleRunner = {
       transcriptsUsed: read.map((t) => t.label),
       ...(missing.size > 0 ? { transcriptsUnread: transcripts.filter((t) => missing.has(t.id)).map((t) => t.label) } : {}),
     };
-    // A ledger missing a call is not cached, so the next run tries that call again.
-    return { status: "done", payload: PromiseLedgerPayloadSchema.parse(payload), ...(unread.length > 0 ? { cacheable: false as const } : {}) };
+    const incomplete = unread.length > 0 ? `Could not read ${unread.map((u) => u.t.label).join(", ")}: ${unread[0]!.error.message}` : undefined;
+    return { status: "done", payload: PromiseLedgerPayloadSchema.parse(payload), ...(incomplete ? { incomplete } : {}) };
   },
 };

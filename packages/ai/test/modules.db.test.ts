@@ -3,7 +3,7 @@ import { BullBearPayloadSchema, BusinessSnapshotPayloadSchema, PromiseLedgerPayl
 import type { StructuredCompletionRequest } from "@finn/shared/ports";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { HistoryTables } from "../src/financials/history";
-import { LlmTransportError, LlmValidationError } from "../src/llm/errors";
+import { BudgetExceededError, LlmTransportError, LlmUnavailableError, LlmValidationError } from "../src/llm/errors";
 import { EXTRACTOR_VERSION } from "../src/prompts/guidance";
 import { bullBearModule } from "../src/modules/bullBear";
 import { businessSnapshotModule } from "../src/modules/businessSnapshot";
@@ -285,12 +285,43 @@ describe.skipIf(!reachable)("research modules against the local database (synthe
       await promiseLedgerModule.run(ctx(fakeLlm({ guidance_extract: byDoc })));
       const logs: string[] = [];
       const r = await promiseLedgerModule.run(ctx(fakeLlm({ guidance_extract: unreadable(docs.t2!.id) }), { log: (m) => logs.push(m) }));
-      expect(r).toMatchObject({ status: "done", cacheable: false });
+      expect(r).toMatchObject({ status: "done", incomplete: expect.stringContaining("Could not read Q1 FY27 concall: guidance_extract: response cut off") });
       const p = PromiseLedgerPayloadSchema.parse(r.payload);
       expect(p.transcriptsUsed).toEqual(["Q2 FY27 concall", "Q1 FY27 concall", "Q4 FY26 concall"]);
       expect(p.transcriptsUnread).toBeUndefined();
       expect(p.promises.find((x) => x.metric === "ebitda_margin")).toMatchObject({ verdict: "missed", saidIn: "Q1 FY27 concall" });
-      expect(logs.filter((m) => m === "guidance extraction failed")).toHaveLength(1);
+      // Read once with the others, then once more on its own before giving up.
+      expect(logs.filter((m) => m === "guidance extraction failed")).toHaveLength(2);
+    });
+
+    it("reads a call again on its own when it fails alongside the others, and a second success leaves nothing incomplete", async () => {
+      let t2Calls = 0;
+      const flaky = fakeLlm({
+        guidance_extract: (req) => {
+          if (req.ref?.id === docs.t2!.id && ++t2Calls === 1) throw new LlmTransportError("LLM HTTP 503", 503);
+          return byDoc(req);
+        },
+      });
+      const r = await promiseLedgerModule.run(ctx(flaky));
+      expect(t2Calls).toBe(2);
+      expect(r).not.toHaveProperty("incomplete");
+      expect(PromiseLedgerPayloadSchema.parse(r.payload).promises.find((x) => x.metric === "ebitda_margin")).toMatchObject({ saidIn: "Q1 FY27 concall" });
+    });
+
+    it("does not spend a second pass when the daily budget is gone or the provider is off", async () => {
+      for (const err of [new BudgetExceededError(5, 5), new LlmUnavailableError("LLM_API_KEY is not set")]) {
+        let t2Calls = 0;
+        const llm = fakeLlm({
+          guidance_extract: (req) => {
+            if (req.ref?.id !== docs.t2!.id) return byDoc(req);
+            t2Calls++;
+            throw err;
+          },
+        });
+        const r = await promiseLedgerModule.run(ctx(llm));
+        expect(t2Calls).toBe(1);
+        expect(r).toMatchObject({ status: "done", incomplete: expect.stringContaining("Q1 FY27 concall") });
+      }
     });
 
     it("names a call that has never been read, builds the ledger from the rest and does not read its silence as dropped guidance", async () => {
@@ -302,12 +333,14 @@ describe.skipIf(!reachable)("research modules against the local database (synthe
       expect(p.summary).toEqual({ elapsed: 2, delivered: 1, missed: 1, pending: 2, quietlyDropped: 0 });
     });
 
-    it("still fails when every call is unreadable or the provider itself fails", async () => {
+    it("tolerates a provider error on one call but fails when no call can be read at all", async () => {
       const allBad = fakeLlm({ guidance_extract: () => { throw new LlmValidationError("guidance_extract: invalid JSON", "guidance_extract"); } });
       await expect(promiseLedgerModule.run(ctx(allBad))).rejects.toBeInstanceOf(LlmValidationError);
-      const down = fakeLlm({ guidance_extract: (req) => { if (req.ref?.id === docs.t2!.id) throw new LlmTransportError("LLM HTTP 503", 503); return byDoc(req); } });
-      await expect(promiseLedgerModule.run(ctx(down))).rejects.toBeInstanceOf(LlmTransportError);
-      expect(await promiseLedgerModule.run(ctx(fakeLlm({ guidance_extract: byDoc })))).not.toHaveProperty("cacheable");
+      const allDown = fakeLlm({ guidance_extract: () => { throw new LlmTransportError("LLM HTTP 503", 503); } });
+      await expect(promiseLedgerModule.run(ctx(allDown))).rejects.toBeInstanceOf(LlmTransportError);
+      const oneDown = fakeLlm({ guidance_extract: (req) => { if (req.ref?.id === docs.t2!.id) throw new LlmTransportError("LLM HTTP 503", 503); return byDoc(req); } });
+      expect(await promiseLedgerModule.run(ctx(oneDown))).toMatchObject({ status: "done", incomplete: expect.stringContaining("LLM HTTP 503") });
+      expect(await promiseLedgerModule.run(ctx(fakeLlm({ guidance_extract: byDoc })))).not.toHaveProperty("incomplete");
     });
 
     it("is insufficient without dated transcripts", async () => {
