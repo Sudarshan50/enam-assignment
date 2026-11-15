@@ -121,6 +121,12 @@ describe.skipIf(!dbUp)("writes against the local database", async () => {
       const retune = await request(app).patch(`/api/v1/alert-rules/${broken!.id}`).set(auth).send({ threshold: 5 });
       expect(retune.status).toBe(400);
       expect(retune.body.error.message).toContain("stored definition is invalid");
+
+      const rename = await request(app).patch(`/api/v1/alert-rules/${broken!.id}`).set(auth).send({ name: `${P} renamed`, enabled: false });
+      expect(rename.status).toBe(400);
+      expect(rename.body.error.message).toContain("stored definition is invalid");
+      const [after] = await sql<{ name: string; enabled: boolean }[]>`SELECT name, enabled FROM alert_rules WHERE id = ${broken!.id}`;
+      expect(after).toEqual({ name: `${P} broken`, enabled: true });
     });
 
     it("lists alerts newest first as Alert[] and marks one read idempotently", async () => {

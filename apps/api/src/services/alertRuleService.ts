@@ -128,12 +128,9 @@ export function createAlertRuleService(deps: { repo: AlertRepository; parser: Ru
     async update(id, patch) {
       const current = await repo.getRule(id);
       if (!current) throw notFound("Alert rule");
-      let definition: AlertRuleDefinition | undefined;
-      if (patch.threshold !== undefined) {
-        const parsed = AlertRuleDefinitionSchema.safeParse(current.definition);
-        if (!parsed.success) throw badRequest("This rule's stored definition is invalid; recreate it");
-        definition = withThreshold(parsed.data, patch.threshold);
-      }
+      const parsed = AlertRuleDefinitionSchema.safeParse(current.definition);
+      if (!parsed.success) throw badRequest("This rule's stored definition is invalid; recreate it");
+      const definition = patch.threshold === undefined ? undefined : withThreshold(parsed.data, patch.threshold);
       const row = await repo.updateRule(id, { name: patch.name, enabled: patch.enabled, definition });
       const rule = row && toRule(row, log);
       if (!rule) throw notFound("Alert rule");
