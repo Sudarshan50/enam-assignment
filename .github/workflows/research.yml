@@ -1,5 +1,6 @@
 name: research
 
+# Manual fallback only: the EC2 worker daemon runs the schedule and drains the research queue.
 on:
   workflow_dispatch:
     inputs:
@@ -9,9 +10,6 @@ on:
       run_id:
         description: "research_runs.id created by the API (optional)"
         required: false
-  schedule:
-    # Fallback queue drain in case a dispatch was lost.
-    - cron: "*/30 * * * *"
 
 permissions:
   contents: read

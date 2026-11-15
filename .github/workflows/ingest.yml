@@ -1,12 +1,7 @@
 name: ingest
 
+# Manual fallback only: the EC2 worker daemon runs the schedule and drains the research queue.
 on:
-  schedule:
-    # Every 15 minutes through the Indian filing day (09:00–23:15 IST), Mon–Fri.
-    - cron: "*/15 3-17 * * 1-5"
-    # Hourly otherwise, so late-night and weekend filings still land.
-    - cron: "0 0-2,18-23 * * 1-5"
-    - cron: "0 * * * 0,6"
   workflow_dispatch:
     inputs:
       from:

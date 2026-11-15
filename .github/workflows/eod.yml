@@ -1,11 +1,7 @@
 name: eod
 
+# Manual fallback only: the EC2 worker daemon runs the schedule and drains the research queue.
 on:
-  schedule:
-    # 19:00 IST, after NSE usually publishes the bhavcopy.
-    - cron: "30 13 * * 1-5"
-    # 21:30 IST retry; --if-missing makes it a no-op when the 19:00 run already stored the session.
-    - cron: "0 16 * * 1-5"
   workflow_dispatch:
     inputs:
       date:
