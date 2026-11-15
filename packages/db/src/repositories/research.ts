@@ -83,8 +83,10 @@ export function researchRepo(sql: Sql) {
       return row ?? null;
     },
 
-    async heartbeat(id: string, workerId: string): Promise<void> {
-      await sql`UPDATE research_runs SET heartbeat_at = now() WHERE id = ${id} AND worker_id = ${workerId}`;
+    /** False once another worker has re-claimed the run. */
+    async heartbeat(id: string, workerId: string): Promise<boolean> {
+      const res = await sql`UPDATE research_runs SET heartbeat_at = now() WHERE id = ${id} AND worker_id = ${workerId}`;
+      return (res.count ?? 0) > 0;
     },
 
     async setStatus(id: string, status: RunStatus, patch: { error?: string | null; inputHash?: string | null } = {}): Promise<void> {
@@ -92,6 +94,39 @@ export function researchRepo(sql: Sql) {
         UPDATE research_runs SET status = ${status}, error = ${patch.error ?? null},
                input_hash = COALESCE(${patch.inputHash ?? null}, input_hash), updated_at = now(), heartbeat_at = now()
         WHERE id = ${id}`;
+    },
+
+    /**
+     * The worker-side status write: lands only while `workerId` still holds the run and it is still active, so a
+     * worker whose lease expired cannot overwrite the new owner. `event` commits with the status, so an SSE reader
+     * that sees a terminal status also sees its closing event.
+     */
+    async setStatusAsOwner(
+      id: string,
+      workerId: string,
+      status: RunStatus,
+      patch: { error?: string | null; inputHash?: string | null } = {},
+      event?: { type: string; message: string; data?: Record<string, unknown> | null },
+    ): Promise<boolean> {
+      return sql.begin(async (raw) => {
+        const tx = raw as unknown as Sql;
+        const res = await tx`
+          UPDATE research_runs SET status = ${status}, error = ${patch.error ?? null},
+                 input_hash = COALESCE(${patch.inputHash ?? null}, input_hash), updated_at = now(), heartbeat_at = now()
+          WHERE id = ${id} AND worker_id = ${workerId} AND status IN ('processing_docs','synthesizing')`;
+        if ((res.count ?? 0) === 0) return false;
+        if (event) await researchRepo(tx).addEvent(id, event.type, event.message, event.data ?? null);
+        return true;
+      });
+    },
+
+    /** Appends an event only while `workerId` holds the run; false means the lease was lost. */
+    async addEventAsOwner(runId: string, workerId: string, type: string, message: string, data: Record<string, unknown> | null = null): Promise<boolean> {
+      const res = await sql`
+        INSERT INTO research_events (run_id, type, message, data)
+        SELECT r.id, ${type}, ${message}, ${data === null ? null : sql.json(data as Parameters<typeof sql.json>[0])}::jsonb
+        FROM research_runs r WHERE r.id = ${runId} AND r.worker_id = ${workerId}`;
+      return (res.count ?? 0) > 0;
     },
 
     async addEvent(runId: string, type: string, message: string, data: Record<string, unknown> | null = null): Promise<void> {
@@ -116,6 +151,28 @@ export function researchRepo(sql: Sql) {
           cache_key = COALESCE(EXCLUDED.cache_key, research_modules.cache_key),
           error = EXCLUDED.error,
           updated_at = now()`;
+    },
+
+    /** upsertModule for the worker holding the run; false (and no write) once the lease was lost. */
+    async upsertModuleAsOwner(
+      runId: string,
+      workerId: string,
+      module: string,
+      status: ModuleRowStatus,
+      patch: { payload?: unknown; cacheKey?: string | null; error?: string | null } = {},
+    ): Promise<boolean> {
+      const payload = patch.payload === undefined || patch.payload === null ? null : sql.json(patch.payload as Parameters<typeof sql.json>[0]);
+      const res = await sql`
+        INSERT INTO research_modules (run_id, module, status, payload, cache_key, error, updated_at)
+        SELECT r.id, ${module}, ${status}, ${payload}::jsonb, ${patch.cacheKey ?? null}, ${patch.error ?? null}, now()
+        FROM research_runs r WHERE r.id = ${runId} AND r.worker_id = ${workerId}
+        ON CONFLICT (run_id, module) DO UPDATE SET
+          status = EXCLUDED.status,
+          payload = COALESCE(EXCLUDED.payload, research_modules.payload),
+          cache_key = COALESCE(EXCLUDED.cache_key, research_modules.cache_key),
+          error = EXCLUDED.error,
+          updated_at = now()`;
+      return (res.count ?? 0) > 0;
     },
 
     async listModules(runId: string): Promise<{ module: string; status: ModuleRowStatus; payload: unknown; error: string | null; updated_at: Date }[]> {

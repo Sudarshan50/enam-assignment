@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { sendNotification } from "web-push";
 import type { Sql } from "@finn/db";
 import { alertsRepo } from "@finn/db/repositories/alerts";
-import { pushRepo } from "@finn/db/repositories/push";
+import { PENDING_CLAIM_TIMEOUT_SECONDS, pushRepo } from "@finn/db/repositories/push";
 import { createWebPushSender, deliverPendingPushes, type PushResult, type PushSender, type PushTarget } from "../src/notify/webPush";
 import { cleanupScope, connectTestDb, insertCompany } from "./support/db";
 import { fakeContext } from "./support/fakes";
@@ -39,14 +39,14 @@ describe("createWebPushSender", () => {
 
   it("maps web-push outcomes: ok, gone on 404/410, failed otherwise", async () => {
     const sender = createWebPushSender({ VAPID_PUBLIC_KEY: "pub", VAPID_PRIVATE_KEY: "priv" })!;
-    const target = { endpoint: "https://ztdn.push.test/x", p256dh: "p", auth: "a" };
+    const target = { endpoint: "https://fcm.googleapis.com/fcm/send/ztdn-x", p256dh: "p", auth: "a" };
 
     mocked.mockResolvedValueOnce({ statusCode: 201, body: "", headers: {} });
     expect(await sender.send(target, "{}")).toEqual({ ok: true });
     expect(mocked).toHaveBeenLastCalledWith(
       { endpoint: target.endpoint, keys: { p256dh: "p", auth: "a" } },
       "{}",
-      expect.objectContaining({ vapidDetails: { subject: "mailto:finn@example.com", publicKey: "pub", privateKey: "priv" }, TTL: 21600 }),
+      expect.objectContaining({ vapidDetails: { subject: "mailto:finn@example.com", publicKey: "pub", privateKey: "priv" }, TTL: 21600, timeout: 30_000 }),
     );
 
     for (const statusCode of [404, 410]) {
@@ -62,9 +62,23 @@ describe("createWebPushSender", () => {
   it("uses VAPID_SUBJECT when given", async () => {
     const sender = createWebPushSender({ VAPID_PUBLIC_KEY: "pub", VAPID_PRIVATE_KEY: "priv", VAPID_SUBJECT: "mailto:ops@ztd.test" })!;
     mocked.mockResolvedValueOnce({ statusCode: 201, body: "", headers: {} });
-    await sender.send({ endpoint: "https://ztdn.push.test/y", p256dh: "p", auth: "a" }, "{}");
+    await sender.send({ endpoint: "https://updates.push.services.mozilla.com/wpush/v2/ztdn-y", p256dh: "p", auth: "a" }, "{}");
     expect(mocked.mock.lastCall?.[2]?.vapidDetails?.subject).toBe("mailto:ops@ztd.test");
   });
+
+  it.each(["https://ztdn.push.test/x", "http://fcm.googleapis.com/fcm/send/x", "https://169.254.169.254/latest", "https://fcm.googleapis.com.evil.test/x", "not a url"])(
+    "never sends to %s, which is not a known Web Push service",
+    async (endpoint) => {
+      const sender = createWebPushSender({ VAPID_PUBLIC_KEY: "pub", VAPID_PRIVATE_KEY: "priv" })!;
+      mocked.mockClear();
+      expect(await sender.send({ endpoint, p256dh: "p", auth: "a" }, "{}")).toEqual({
+        ok: false,
+        gone: false,
+        error: "Endpoint is not a known Web Push service; not sent",
+      });
+      expect(mocked).not.toHaveBeenCalled();
+    },
+  );
 });
 
 const sql = (await connectTestDb()) as Sql;
@@ -212,12 +226,49 @@ describe.skipIf(sql === null)("deliverPendingPushes against the local database",
     expect(ra.skipped + rb.skipped).toBeLessThanOrEqual(2);
     expect((await deliveries()).map((d) => [d.status, d.attempts])).toEqual([["sent", 1], ["sent", 1]]);
 
-    // A claim left 'pending' by a crashed worker is never re-sent.
+    // A fresh 'pending' claim belongs to a run that may still be sending, so it is left alone.
     await sql`DELETE FROM alerts WHERE symbol LIKE ${`${scope.symbol}%`}`;
     const [crashed] = await alerts(1);
     expect(await pushRepo(sql).claimDelivery(crashed!.id, endpoint("race"))).toBe(true);
     const after = fakeSender();
     expect(await deliverPendingPushes(ctx, after)).toMatchObject({ sent: 0 });
     expect(after.sent).toEqual([]);
+  });
+
+  it("a claim abandoned mid-send becomes reclaimable after the timeout, within the attempt budget", async () => {
+    await subscribe("crash");
+    const [alert] = await alerts(1);
+    const abandon = async () => {
+      expect(await pushRepo(sql).claimDelivery(alert!.id, endpoint("crash"))).toBe(true);
+      await sql`UPDATE notification_deliveries SET updated_at = now() - make_interval(secs => ${PENDING_CLAIM_TIMEOUT_SECONDS + 1}) WHERE alert_id = ${alert!.id}`;
+    };
+
+    await abandon();
+    const retry = fakeSender({ [endpoint("crash")]: { ok: false, gone: false, error: "HTTP 503" } });
+    expect(await deliverPendingPushes(ctx, retry)).toMatchObject({ failed: 1 });
+    expect(await deliveries()).toEqual([{ endpoint: endpoint("crash"), status: "failed", attempts: 2, last_error: "HTTP 503" }]);
+
+    // The third (last) attempt is abandoned too: nothing is left to retry.
+    await sql`UPDATE notification_deliveries SET status = 'pending', attempts = 3, updated_at = now() - interval '1 hour' WHERE alert_id = ${alert!.id}`;
+    const exhausted = fakeSender();
+    expect(await deliverPendingPushes(ctx, exhausted)).toMatchObject({ sent: 0, failed: 0 });
+    expect(exhausted.sent).toEqual([]);
+  });
+
+  it("a sender that throws releases the claim as failed so the next run retries it", async () => {
+    await subscribe("throws");
+    await alerts(1);
+    let explode = true;
+    const sender: PushSender = {
+      async send() {
+        if (explode) throw new Error("socket closed");
+        return { ok: true };
+      },
+    };
+    expect(await deliverPendingPushes(ctx, sender)).toMatchObject({ failed: 1, sent: 0 });
+    expect(await deliveries()).toEqual([{ endpoint: endpoint("throws"), status: "failed", attempts: 1, last_error: "socket closed" }]);
+    explode = false;
+    expect(await deliverPendingPushes(ctx, sender)).toMatchObject({ sent: 1 });
+    expect(await deliveries()).toEqual([{ endpoint: endpoint("throws"), status: "sent", attempts: 2, last_error: null }]);
   });
 });

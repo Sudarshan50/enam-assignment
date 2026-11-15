@@ -34,18 +34,20 @@ export function createResearchRepository(sql: Sql): ResearchRepository & Researc
       return row ?? null;
     },
 
-    async countCreatedSince(since) {
-      const [row] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM research_runs WHERE created_at >= ${since}`;
-      return row?.n ?? 0;
-    },
-
-    async insertQueued({ symbol, modules, requestedBy }) {
-      const [row] = await sql<RunRecord[]>`
-        INSERT INTO research_runs AS r (symbol, modules, requested_by)
-        VALUES (${symbol}, ${modules}::text[], ${requestedBy})
-        ON CONFLICT (symbol) WHERE status IN ('queued','processing_docs','synthesizing') DO NOTHING
-        RETURNING ${runColumns(sql)}`;
-      return row ?? null;
+    async insertQueued({ symbol, modules, requestedBy, since, dailyLimit }) {
+      return sql.begin(async (raw) => {
+        const tx = raw as unknown as Sql;
+        // Held to commit, so a concurrent request counts only after this insert is visible (READ COMMITTED).
+        await tx`SELECT pg_advisory_xact_lock(hashtext('finn:research_runs:daily_limit'))`;
+        const [used] = await tx<{ n: number }[]>`SELECT count(*)::int AS n FROM research_runs WHERE created_at >= ${since}`;
+        if ((used?.n ?? 0) >= dailyLimit) return "limit_reached" as const;
+        const [row] = await tx<RunRecord[]>`
+          INSERT INTO research_runs AS r (symbol, modules, requested_by)
+          VALUES (${symbol}, ${modules}::text[], ${requestedBy})
+          ON CONFLICT (symbol) WHERE status IN ('queued','processing_docs','synthesizing') DO NOTHING
+          RETURNING ${runColumns(tx)}`;
+        return row ?? ("active_exists" as const);
+      });
     },
 
     async appendEvent(runId, type, message, data) {

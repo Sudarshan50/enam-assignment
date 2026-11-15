@@ -19,6 +19,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       global: { windowMs: 60_000, limit: 10_000 },
       ask: { windowMs: 60_000, limit: 10_000 },
       research: { windowMs: 60_000, limit: 10_000 },
+      pushTest: { windowMs: 60_000, limit: 10_000 },
     },
     responseValidation: "strict",
     sse: { pollMs: 10, heartbeatMs: 1_000, maxDurationMs: 5_000, retryMs: 1_000 },

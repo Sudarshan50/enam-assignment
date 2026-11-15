@@ -23,7 +23,7 @@ export interface AppConfig {
   isProduction: boolean;
   trustProxy: number | boolean | string;
   jsonLimit: string;
-  rateLimits: { global: RateLimitRule; ask: RateLimitRule; research: RateLimitRule };
+  rateLimits: { global: RateLimitRule; ask: RateLimitRule; research: RateLimitRule; pushTest: RateLimitRule };
   responseValidation: ResponseValidationMode;
   sse: SseOptions;
 }

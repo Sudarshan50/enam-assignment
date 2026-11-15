@@ -12,8 +12,9 @@ export function createPushRepository(sql: Sql): PushRepository {
       const rows = await sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint} RETURNING endpoint`;
       return rows.length > 0;
     },
-    async list() {
-      return sql<StoredSubscription[]>`SELECT endpoint, p256dh, auth FROM push_subscriptions`;
+    async find(endpoint) {
+      const [row] = await sql<StoredSubscription[]>`SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE endpoint = ${endpoint}`;
+      return row ?? null;
     },
     async markOk(endpoint) {
       await sql`UPDATE push_subscriptions SET last_ok_at = now() WHERE endpoint = ${endpoint}`;

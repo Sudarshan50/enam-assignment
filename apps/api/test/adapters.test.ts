@@ -202,6 +202,7 @@ describe("configuration", () => {
       global: { windowMs: 60_000, limit: 120 },
       ask: { windowMs: 60_000, limit: 3 },
       research: { windowMs: 60_000, limit: 10 },
+      pushTest: { windowMs: 60_000, limit: 3 },
     });
     expect(toAppConfig(loadConfig({ ...BASE_ENV, TRUST_PROXY: "true" })).trustProxy).toBe(true);
     expect(toAppConfig(loadConfig({ ...BASE_ENV, TRUST_PROXY: "false" })).trustProxy).toBe(false);

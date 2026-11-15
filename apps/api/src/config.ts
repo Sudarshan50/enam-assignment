@@ -24,6 +24,7 @@ const EnvSchema = z.object({
   RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(120),
   ASK_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(6),
   RESEARCH_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(10),
+  PUSH_TEST_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).default(3),
 
   LLM_BASE_URL: z.string().url().default("https://inference.hyde.tech/v1"),
   LLM_API_KEY: optionalString,
@@ -79,6 +80,7 @@ export function toAppConfig(config: Config): AppConfig {
       global: { windowMs: minute, limit: config.RATE_LIMIT_PER_MIN },
       ask: { windowMs: minute, limit: config.ASK_RATE_LIMIT_PER_MIN },
       research: { windowMs: minute, limit: config.RESEARCH_RATE_LIMIT_PER_MIN },
+      pushTest: { windowMs: minute, limit: config.PUSH_TEST_RATE_LIMIT_PER_MIN },
     },
     responseValidation,
     sse: DEFAULT_SSE_OPTIONS,

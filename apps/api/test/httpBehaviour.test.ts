@@ -70,7 +70,7 @@ describe("internal jobs accept only Bearer JOBS_SECRET", () => {
 describe("request validation", () => {
   const app = buildTestApp();
   const id = randomUUID();
-  const sub = { endpoint: "https://push.example/x", keys: { p256dh: "k", auth: "a" } };
+  const sub = { endpoint: "https://fcm.googleapis.com/fcm/send/x", keys: { p256dh: "k", auth: "a" } };
   const rule = { type: "price_move", scope: { kind: "portfolio" }, direction: "up", thresholdPct: 5 };
 
   const cases: [string, string, string, unknown, string[]][] = [
@@ -89,6 +89,12 @@ describe("request validation", () => {
     ["PATCH", `/api/v1/alert-rules/${id}`, "blank name", { name: "  " }, ["name"]],
     ["POST", "/api/v1/push-subscriptions", "bad endpoint and keys", { endpoint: "not a url", keys: {} }, ["endpoint", "keys.p256dh", "keys.auth"]],
     ["DELETE", "/api/v1/push-subscriptions", "bad endpoint", { endpoint: "nope" }, ["endpoint"]],
+    ["POST", "/api/v1/push-subscriptions", "an endpoint on an arbitrary host", { ...sub, endpoint: "https://169.254.169.254/latest/meta-data" }, ["endpoint"]],
+    ["POST", "/api/v1/push-subscriptions", "a plain-http push host", { ...sub, endpoint: "http://fcm.googleapis.com/fcm/send/x" }, ["endpoint"]],
+    ["POST", "/api/v1/push-subscriptions", "a look-alike host", { ...sub, endpoint: "https://fcm.googleapis.com.evil.example/x" }, ["endpoint"]],
+    ["POST", "/api/v1/push-subscriptions", "a push host on another port", { ...sub, endpoint: "https://fcm.googleapis.com:8443/x" }, ["endpoint"]],
+    ["POST", "/api/v1/push/test", "a missing endpoint", {}, ["endpoint"]],
+    ["POST", "/api/v1/push/test", "an endpoint on an arbitrary host", { endpoint: "https://internal.example/x" }, ["endpoint"]],
     ["PUT", "/api/v1/prefs", "nothing to update", {}, [""]],
     ["PUT", "/api/v1/prefs", "unknown window", { defaultWindow: "1y" }, ["defaultWindow"]],
     ["PUT", "/api/v1/prefs", "bad quiet hours", { quietHours: { enabled: true, start: "25:00", end: "7" } }, ["quietHours.start", "quietHours.end"]],
@@ -101,6 +107,22 @@ describe("request validation", () => {
     expect(res.body.error.code).toBe("validation_error");
     expect(res.body.error.details.map((d: { path: string }) => d.path)).toEqual(expect.arrayContaining(paths));
     for (const d of res.body.error.details) expect(d).toEqual({ path: expect.any(String), message: expect.any(String) });
+  });
+
+  it.each([
+    "https://fcm.googleapis.com/fcm/send/abc",
+    "https://android.googleapis.com/gcm/send/abc",
+    "https://updates.push.services.mozilla.com/wpush/v2/abc",
+    "https://web.push.apple.com/QAbc",
+    "https://api.push.apple.com/3/device/abc",
+    "https://wns2-par02p.notify.windows.com/w/?token=abc",
+    "https://db5p.notify.windows.com/w/?token=abc",
+  ])("accepts a subscription on a known push service: %s", async (endpoint) => {
+    const subscribe = vi.fn(async () => {});
+    const app = buildTestApp({ push: { publicKey: vi.fn(), subscribe, unsubscribe: vi.fn(), sendTest: vi.fn() } });
+    const res = await request(app).post("/api/v1/push-subscriptions").set(auth).send({ ...sub, endpoint });
+    expect(res.status).toBe(201);
+    expect(subscribe).toHaveBeenCalledWith({ ...sub, endpoint });
   });
 
   it("puts the first issue in the message, without a path prefix for whole-body refinements", async () => {
@@ -187,6 +209,19 @@ describe("rate limits with the default configuration", () => {
     expect(res.status).toBe(429);
     expect(res.body.error.message).toBe("Too many research requests. Try again in a minute.");
     expect(create).toHaveBeenCalledTimes(10);
+  });
+
+  it("allows 3 test pushes a minute", async () => {
+    const sendTest = vi.fn(async () => ({ sent: 1, failed: 0, pruned: 0 }));
+    const push = { publicKey: vi.fn(), subscribe: vi.fn(), unsubscribe: vi.fn(), sendTest };
+    const app = buildTestApp({ push }, { rateLimits: defaultLimits });
+    const body = { endpoint: "https://fcm.googleapis.com/fcm/send/x" };
+    for (let i = 0; i < 3; i++) expect((await request(app).post("/api/v1/push/test").set(auth).send(body)).status).toBe(200);
+    const res = await request(app).post("/api/v1/push/test").set(auth).send(body);
+    expect(res.status).toBe(429);
+    expect(res.body.error).toEqual({ code: "rate_limited", message: "Too many test notifications. Try again in a minute." });
+    expect(sendTest).toHaveBeenCalledTimes(3);
+    expect(sendTest).toHaveBeenCalledWith(body.endpoint);
   });
 
   it("applies the global limit of 120 a minute across /api/v1 but never to /healthz", async () => {

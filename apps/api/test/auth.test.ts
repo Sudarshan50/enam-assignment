@@ -67,5 +67,5 @@ describe("rate limiting", () => {
 
 function buildLimits() {
   const open = { windowMs: 60_000, limit: 10_000 };
-  return { global: open, ask: open, research: open };
+  return { global: open, ask: open, research: open, pushTest: open };
 }

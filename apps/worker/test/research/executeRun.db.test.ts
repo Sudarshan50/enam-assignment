@@ -260,6 +260,66 @@ describe.skipIf(!reachable)("executeResearchRun end to end (fake network, LLM an
     expect(summary.status).toBe("failed");
     expect((await eventsOf(run.id)).at(-1)!.type).toBe("run.failed");
   });
+
+  describe("after another worker re-claims the run (our lease expired)", () => {
+    const steal = (runId: string) => sql`UPDATE research_runs SET worker_id = 'zta-thief', heartbeat_at = now() WHERE id = ${runId}`;
+    const park = (runId: string) => researchRepo(sql).setStatus(runId, "cancelled");
+
+    it("mid-modules: the stale worker writes no module result, terminal status or closing event", async () => {
+      const run = await claimedRun(SYM);
+      const reg = new ModuleRegistry()
+        .register({
+          key: "bull_bear",
+          version: "zta-1",
+          inputs: { documents: true, history: false },
+          async run() {
+            await steal(run.id);
+            return { status: "done", payload: { stale: true } };
+          },
+        })
+        .register({ key: "business_snapshot", version: "zta-1", inputs: { documents: true, history: false }, run: async () => ({ status: "done", payload: {} }) });
+      const ctx = fakeContext(sql);
+      const summary = await executeResearchRun(ctx, run, { workerId: "zta-worker", registry: reg, asOf: AS_OF, noModuleCache: true });
+
+      expect(summary.status).toBe("superseded");
+      expect((await researchRepo(sql).get(run.id))!).toMatchObject({ status: "synthesizing", worker_id: "zta-thief" });
+      const modules = await researchRepo(sql).listModules(run.id);
+      expect(modules.find((m) => m.module === "bull_bear")).toMatchObject({ status: "running", payload: null });
+      const types = (await eventsOf(run.id)).map((e) => e.type);
+      expect(types).not.toContain("run.completed");
+      expect(types).not.toContain("run.failed");
+      expect(types).not.toContain("module.completed");
+      expect(ctx.lines.at(-1)).toMatchObject({ level: "warn", msg: "research run was re-claimed by another worker; stopped without writing to it" });
+      await park(run.id);
+    });
+
+    it("during discovery: no further events, no documents processed or marked failed", async () => {
+      const run = await claimedRun(SYM);
+      screener.fetch.mockImplementationOnce(async (_http: unknown, symbol: string) => {
+        await steal(run.id);
+        return screenerCompany(symbol, baseLinks, HISTORY);
+      });
+      const before = await documentsRepo(sql).listBySymbol(SYM);
+      const summary = await executeResearchRun(fakeContext(sql), run, { workerId: "zta-worker", registry: registry({ failBullBear: false }).reg, asOf: AS_OF });
+
+      expect(summary).toMatchObject({ status: "superseded", documents: [], modules: [] });
+      expect((await researchRepo(sql).get(run.id))!).toMatchObject({ status: "processing_docs", worker_id: "zta-thief" });
+      expect((await eventsOf(run.id)).map((e) => e.type)).toEqual(["run.started"]);
+      const after = await documentsRepo(sql).listBySymbol(SYM);
+      expect(after.map((d) => [d.id, d.status])).toEqual(before.map((d) => [d.id, d.status]));
+      await park(run.id);
+    });
+
+    it("before the failure write: a stale worker's crash does not fail the new owner's run", async () => {
+      const run = await claimedRun(GHOST);
+      await steal(run.id);
+      const summary = await executeResearchRun(fakeContext(sql), run, { workerId: "zta-worker", registry: registry({ failBullBear: false }).reg });
+      expect(summary.status).toBe("superseded");
+      expect((await researchRepo(sql).get(run.id))!).toMatchObject({ status: "processing_docs", worker_id: "zta-thief", error: null });
+      expect(await eventsOf(run.id)).toEqual([]);
+      await park(run.id);
+    });
+  });
 });
 
 describe.skipIf(!reachable)("research command", () => {

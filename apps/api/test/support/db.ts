@@ -48,7 +48,10 @@ export function testEnv(overrides: Record<string, string> = {}): Config {
 }
 
 const OPEN = { windowMs: 60_000, limit: 100_000 };
-export const openLimits: AppConfig["rateLimits"] = { global: OPEN, ask: OPEN, research: OPEN };
+export const openLimits: AppConfig["rateLimits"] = { global: OPEN, ask: OPEN, research: OPEN, pushTest: OPEN };
+
+/** Push endpoints this suite registers: a real push-service host (anything else is rejected), never sent to. */
+export const testPushEndpoint = (prefix: string) => `https://fcm.googleapis.com/fcm/send/${prefix}`;
 
 export type FakeDispatcher = WorkerDispatcher & { dispatchResearch: ReturnType<typeof vi.fn>; fail: boolean };
 
@@ -151,7 +154,7 @@ export async function cleanupPrefix(sql: Sql, prefix: string) {
   await sql`DELETE FROM prices_eod WHERE symbol LIKE ${like}`;
   await sql`DELETE FROM alerts WHERE symbol LIKE ${like}`;
   await sql`DELETE FROM alert_rules WHERE name LIKE ${like}`;
-  await sql`DELETE FROM push_subscriptions WHERE endpoint LIKE ${`https://push.example.test/${prefix}%`}`;
+  await sql`DELETE FROM push_subscriptions WHERE endpoint LIKE ${`${testPushEndpoint(prefix)}%`}`;
   await sql`DELETE FROM holdings WHERE symbol LIKE ${like}`;
   await sql`DELETE FROM companies WHERE symbol LIKE ${like}`;
 }

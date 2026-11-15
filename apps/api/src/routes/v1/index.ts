@@ -42,7 +42,12 @@ export function createV1Router({ config, services, logger, shutdownSignal }: App
     }),
   );
   v1.use(alertsRouter({ rules: services.alertRules, alerts: services.alerts }));
-  v1.use(pushRouter(services.push));
+  v1.use(
+    pushRouter({
+      push: services.push,
+      testLimiter: createRateLimiter("push-test", limits.pushTest, "Too many test notifications. Try again in a minute."),
+    }),
+  );
   v1.use(prefsRouter(services.prefs));
   v1.use(engineRouter(services.engine));
 

@@ -5,6 +5,7 @@ import { closeDb, getDb } from "@finn/db";
 import { MODULE_KEYS, ResearchRunSchema } from "@finn/shared";
 import { StartRunResponseSchema } from "../../web/src/lib/api/schemas";
 import { CompanyResearchSchema, CreateResearchRunResponseSchema } from "../src/contracts";
+import { startOfIstDay } from "../src/lib/time";
 import type { ResearchRepository } from "../src/services/researchService";
 import { JOBS_SECRET, TOKEN, auth } from "./helpers";
 import { buildDbApp, cleanupPrefix, dbReachable, expectParse, fakeDispatcher, insertCompany } from "./support/db";
@@ -221,6 +222,40 @@ describe.skipIf(!dbUp)("research runs against the local database", async () => {
     expect(res.body.error).toEqual({ code: "research_limit_reached", message: expect.stringContaining("limit of 0") });
     expect(dispatcher.dispatchResearch).not.toHaveBeenCalled();
     expect(await runsFor(`${P}QUOTA`)).toHaveLength(0);
+  });
+
+  it("a burst of requests for different symbols never takes more runs than the daily limit allows", async () => {
+    const symbols = ["BA", "BB", "BC", "BD", "BE", "BF"].map((s) => `${P}${s}`);
+    for (const s of symbols) await insertCompany(sql, s);
+    let arrivals = 0;
+    let release!: () => void;
+    const allArrived = new Promise<void>((r) => (release = r));
+    // Every request passes the cache and active-run checks before any of them reaches the count + insert.
+    const wrapRepo = (repo: ResearchRepository): ResearchRepository => ({
+      ...repo,
+      async findActive(symbol) {
+        const found = await repo.findActive(symbol);
+        if (symbols.includes(symbol) && arrivals < symbols.length) {
+          if (++arrivals === symbols.length) release();
+          await allArrived;
+        }
+        return found;
+      },
+    });
+    const [today] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM research_runs WHERE created_at >= ${startOfIstDay(new Date())}`;
+    const allowed = 2;
+    const { app } = await buildDbApp(sql, { runsPerDay: today!.n + allowed, wrapRepo });
+
+    const results = await Promise.all(symbols.map((s) => post(app, s)));
+    const accepted = results.filter((r) => r.status === 202);
+    const refused = results.filter((r) => r.status === 429);
+    expect(accepted.length + refused.length).toBe(symbols.length);
+    expect(refused.every((r) => r.body.error.code === "research_limit_reached")).toBe(true);
+    // Other suites may insert runs meanwhile, which can only leave fewer slots for this burst.
+    expect(accepted.length).toBeLessThanOrEqual(allowed);
+    const [created] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM research_runs WHERE symbol = ANY(${symbols}::text[])`;
+    expect(created!.n).toBe(accepted.length);
+    await sql`DELETE FROM research_runs WHERE symbol = ANY(${symbols}::text[])`;
   });
 
   it("counts the daily quota from midnight IST, not UTC", async () => {

@@ -1,11 +1,13 @@
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { type Sql, closeDb, getDb } from "@finn/db";
 import { AlertRuleSchema, AlertSchema, DigestResponseSchema, USER_WEIGHT_RANGE } from "@finn/shared";
 import { AnnouncementDetailSchema, CompanySearchResultSchema, FinancialsResponseSchema, InteractionResponseSchema, PrefsSchema, PreviewResponseSchema } from "../src/contracts";
-import { auth } from "./helpers";
-import { buildDbApp, cleanupPrefix, dbReachable, expectParse, inRollback, insertCompany } from "./support/db";
+import { createPushRepository } from "../src/repositories/push";
+import { type PushSender, createPushService } from "../src/services/pushService";
+import { auth, silentLog } from "./helpers";
+import { buildDbApp, cleanupPrefix, dbReachable, expectParse, inRollback, insertCompany, testPushEndpoint } from "./support/db";
 
 const dbUp = await dbReachable();
 const P = "ZTPM";
@@ -54,7 +56,7 @@ describe.skipIf(!dbUp)("writes against the local database", async () => {
     await cleanupPrefix(sql, P);
     const [left] = await sql<{ n: number }[]>`
       SELECT (SELECT count(*) FROM alert_rules WHERE name LIKE ${`${P}%`})
-           + (SELECT count(*) FROM push_subscriptions WHERE endpoint LIKE ${`https://push.example.test/${P}%`})
+           + (SELECT count(*) FROM push_subscriptions WHERE endpoint LIKE ${`${testPushEndpoint(P)}%`})
            + (SELECT count(*) FROM companies WHERE symbol LIKE ${`${P}%`}) AS n`;
     expect(Number(left!.n)).toBe(0);
     await closeDb();
@@ -157,7 +159,7 @@ describe.skipIf(!dbUp)("writes against the local database", async () => {
   });
 
   describe("push subscriptions (committed ZTPM endpoints, removed in afterAll)", () => {
-    const endpoint = `https://push.example.test/${P}-${Date.now()}`;
+    const endpoint = `${testPushEndpoint(P)}-${Date.now()}`;
     const keysFor = () => sql<{ p256dh: string; auth: string }[]>`SELECT p256dh, auth FROM push_subscriptions WHERE endpoint = ${endpoint}`;
 
     it("upserts by endpoint and deletes idempotently", async () => {
@@ -179,7 +181,27 @@ describe.skipIf(!dbUp)("writes against the local database", async () => {
     it("reports push as disabled without VAPID keys and sends nothing on /push/test", async () => {
       const { app } = await buildDbApp(sql);
       expect((await request(app).get("/api/v1/push/vapid-public-key").set(auth)).body).toEqual({ enabled: false, publicKey: null });
-      expect((await request(app).post("/api/v1/push/test").set(auth)).body).toEqual({ sent: 0, failed: 0, pruned: 0 });
+      expect((await request(app).post("/api/v1/push/test").set(auth).send({ endpoint })).body).toEqual({ sent: 0, failed: 0, pruned: 0 });
+    });
+
+    it("/push/test sends only to the stored subscription named in the body, never to the others", async () => {
+      const mine = `${testPushEndpoint(P)}-mine-${Date.now()}`;
+      const other = `${testPushEndpoint(P)}-other-${Date.now()}`;
+      const send = vi.fn<PushSender["send"]>(async () => ({ ok: true }));
+      const push = createPushService({ repo: createPushRepository(sql), sender: { send }, vapidPublicKey: "BPK", log: silentLog });
+      const { app } = await buildDbApp(sql, { services: { push } });
+      for (const e of [mine, other]) {
+        expect((await request(app).post("/api/v1/push-subscriptions").set(auth).send({ endpoint: e, keys: { p256dh: "k", auth: "a" } })).status).toBe(201);
+      }
+
+      const res = await request(app).post("/api/v1/push/test").set(auth).send({ endpoint: mine });
+      expect(res.body).toEqual({ sent: 1, failed: 0, pruned: 0 });
+      expect(send.mock.calls.map(([sub]) => sub.endpoint)).toEqual([mine]);
+
+      const unknown = await request(app).post("/api/v1/push/test").set(auth).send({ endpoint: `${testPushEndpoint(P)}-never-registered` });
+      expect(unknown.status).toBe(404);
+      expect(send).toHaveBeenCalledTimes(1);
+      await sql`DELETE FROM push_subscriptions WHERE endpoint IN (${mine}, ${other})`;
     });
 
     it("exposes the public key once VAPID is configured", async () => {

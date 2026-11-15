@@ -26,7 +26,6 @@ function researchRepo(overrides: Partial<ResearchRepository> = {}): ResearchRepo
     findCompany: async (symbol) => ({ symbol, name: `${symbol} Ltd` }),
     findLatestCompleted: async () => null,
     findActive: async () => null,
-    countCreatedSince: async () => 0,
     insertQueued: async () => run,
     appendEvent: async () => {},
     markDispatched: vi.fn(async () => {}),
@@ -47,17 +46,28 @@ describe("research quota window", () => {
     ["00:01 IST counts from the new midnight", "2026-11-15T18:31:00Z", "2026-11-15T18:30:00.000Z"],
     ["05:00 IST (still the previous UTC day)", "2026-11-14T23:30:00Z", "2026-11-14T18:30:00.000Z"],
   ])("%s", async (_label, now, expectedSince) => {
-    const countCreatedSince = vi.fn(async () => 0);
+    const base = researchRepo();
+    const insertQueued = vi.fn(base.insertQueued);
     const research = createResearchService({
-      repo: researchRepo({ countCreatedSince }),
+      repo: { ...base, insertQueued },
       dispatcher: createNoopDispatcher(silentLog),
       runsPerDay: 5,
       now: () => new Date(now),
       log: silentLog,
     });
     await research.create({ symbol: "TCS" });
-    expect((countCreatedSince.mock.calls[0] as unknown as [Date])[0].toISOString()).toBe(expectedSince);
+    expect(insertQueued.mock.calls[0]![0]).toMatchObject({ dailyLimit: 5 });
+    expect(insertQueued.mock.calls[0]![0].since.toISOString()).toBe(expectedSince);
     expect(startOfIstDay(new Date(now)).toISOString()).toBe(expectedSince);
+  });
+
+  it("maps a refused insert to 429 research_limit_reached without queueing an event or dispatching", async () => {
+    const repo = researchRepo({ insertQueued: async () => "limit_reached", appendEvent: vi.fn(async () => {}) });
+    const dispatcher = { kind: "github" as const, dispatchResearch: vi.fn(async () => {}) };
+    const research = createResearchService({ repo, dispatcher, runsPerDay: 5, log: silentLog });
+    await expect(research.create({ symbol: "TCS" })).rejects.toMatchObject({ status: 429, code: "research_limit_reached" });
+    expect(repo.appendEvent).not.toHaveBeenCalled();
+    expect(dispatcher.dispatchResearch).not.toHaveBeenCalled();
   });
 
   it("does not mark a run dispatched when the dispatcher is the no-op (it waits for a manual worker)", async () => {
@@ -71,7 +81,7 @@ describe("research quota window", () => {
 
   it("fails loudly if the insert conflicted but no active run can be found", async () => {
     const research = createResearchService({
-      repo: researchRepo({ insertQueued: async () => null }),
+      repo: researchRepo({ insertQueued: async () => "active_exists" }),
       dispatcher: createNoopDispatcher(silentLog),
       runsPerDay: 5,
       log: silentLog,
@@ -310,35 +320,52 @@ describe("prefs read model", () => {
 });
 
 describe("push test sends", () => {
+  const FCM = "https://fcm.googleapis.com/fcm/send/";
   function setup(results: Record<string, Awaited<ReturnType<PushSender["send"]>>>) {
     const subs = Object.keys(results).map((endpoint) => ({ endpoint, p256dh: "k", auth: "a" }));
-    const repo: PushRepository = { upsert: vi.fn(), remove: vi.fn(async () => true), list: async () => subs, markOk: vi.fn(async () => {}) };
+    const repo: PushRepository = {
+      upsert: vi.fn(),
+      remove: vi.fn(async () => true),
+      find: async (endpoint) => subs.find((s) => s.endpoint === endpoint) ?? null,
+      markOk: vi.fn(async () => {}),
+    };
     const send = vi.fn(async (sub: { endpoint: string }) => results[sub.endpoint]!);
     const log = { ...silentLog, warn: vi.fn() };
     return { repo, send, log, service: createPushService({ repo, sender: { send }, vapidPublicKey: "BPK", log }) };
   }
 
-  it("counts sent, failed and pruned, marks good endpoints and removes gone ones", async () => {
+  it("sends only to the requested stored subscription: marks it ok, prunes it when gone, logs a failure", async () => {
     const { repo, send, log, service } = setup({
-      "https://a": { ok: true },
-      "https://gone": { ok: false, gone: true, error: "410: Gone" },
-      "https://flaky": { ok: false, gone: false, error: "500: oops" },
+      [`${FCM}a`]: { ok: true },
+      [`${FCM}gone`]: { ok: false, gone: true, error: "410: Gone" },
+      [`${FCM}flaky`]: { ok: false, gone: false, error: "500: oops" },
     });
-    expect(await service.sendTest()).toEqual({ sent: 1, failed: 1, pruned: 1 });
-    expect(send).toHaveBeenCalledWith(expect.objectContaining({ endpoint: "https://a" }), { title: "FINN", body: "Push notifications are working.", url: "/" });
-    expect(repo.markOk).toHaveBeenCalledWith("https://a");
-    expect(repo.remove).toHaveBeenCalledWith("https://gone");
-    expect(repo.remove).toHaveBeenCalledTimes(1);
+    expect(await service.sendTest(`${FCM}a`)).toEqual({ sent: 1, failed: 0, pruned: 0 });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(expect.objectContaining({ endpoint: `${FCM}a` }), { title: "FINN", body: "Push notifications are working.", url: "/" });
+    expect(repo.markOk).toHaveBeenCalledWith(`${FCM}a`);
+
+    expect(await service.sendTest(`${FCM}gone`)).toEqual({ sent: 0, failed: 0, pruned: 1 });
+    expect(repo.remove).toHaveBeenCalledWith(`${FCM}gone`);
+    expect(await service.sendTest(`${FCM}flaky`)).toEqual({ sent: 0, failed: 1, pruned: 0 });
     expect(log.warn).toHaveBeenCalledWith({ error: "500: oops" }, "test push failed");
+    expect(repo.remove).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(3);
     expect(service.publicKey()).toEqual({ enabled: true, publicKey: "BPK" });
   });
 
+  it("404s for an endpoint that is not stored and sends nothing", async () => {
+    const { send, service } = setup({ [`${FCM}a`]: { ok: true } });
+    await expect(service.sendTest(`${FCM}someone-else`)).rejects.toMatchObject({ status: 404, code: "not_found" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("is disabled without a sender or without a public key", async () => {
-    const repo: PushRepository = { upsert: vi.fn(async () => {}), remove: vi.fn(async () => false), list: vi.fn(async () => []), markOk: vi.fn() };
+    const repo: PushRepository = { upsert: vi.fn(async () => {}), remove: vi.fn(async () => false), find: vi.fn(async () => null), markOk: vi.fn() };
     const noSender = createPushService({ repo, sender: null, vapidPublicKey: "BPK", log: silentLog });
     expect(noSender.publicKey()).toEqual({ enabled: false, publicKey: null });
-    expect(await noSender.sendTest()).toEqual({ sent: 0, failed: 0, pruned: 0 });
-    expect(repo.list).not.toHaveBeenCalled();
+    expect(await noSender.sendTest(`${FCM}a`)).toEqual({ sent: 0, failed: 0, pruned: 0 });
+    expect(repo.find).not.toHaveBeenCalled();
     const noKey = createPushService({ repo, sender: { send: vi.fn() }, vapidPublicKey: null, log: silentLog });
     expect(noKey.publicKey()).toEqual({ enabled: false, publicKey: null });
     await noKey.subscribe({ endpoint: "https://e", keys: { p256dh: "p", auth: "a" } });
@@ -348,9 +375,12 @@ describe("push test sends", () => {
   });
 
   it("routes push endpoints through the HTTP layer", async () => {
-    const { service } = setup({ "https://a": { ok: true } });
+    const { service, send } = setup({ [`${FCM}a`]: { ok: true } });
     const app = buildTestApp({ push: service });
-    expect((await request(app).post("/api/v1/push/test").set(auth)).body).toEqual({ sent: 1, failed: 0, pruned: 0 });
+    expect((await request(app).post("/api/v1/push/test").set(auth).send({ endpoint: `${FCM}a` })).body).toEqual({ sent: 1, failed: 0, pruned: 0 });
+    expect((await request(app).post("/api/v1/push/test").set(auth).send({ endpoint: `${FCM}nobody` })).status).toBe(404);
+    expect((await request(app).post("/api/v1/push/test").set(auth)).status).toBe(400);
+    expect(send).toHaveBeenCalledTimes(1);
     expect((await request(app).get("/api/v1/push/vapid-public-key").set(auth)).body).toEqual({ enabled: true, publicKey: "BPK" });
   });
 });

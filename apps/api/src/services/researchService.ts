@@ -46,9 +46,17 @@ export interface ResearchRepository {
   findCompany(symbol: string): Promise<{ symbol: string; name: string } | null>;
   findLatestCompleted(symbol: string, since: Date): Promise<RunRecord | null>;
   findActive(symbol: string): Promise<RunRecord | null>;
-  countCreatedSince(since: Date): Promise<number>;
-  /** Inserts a queued run; null when another active run for the symbol won the race. */
-  insertQueued(input: { symbol: string; modules: ModuleKey[]; requestedBy: string | null }): Promise<RunRecord | null>;
+  /**
+   * Inserts a queued run unless `dailyLimit` runs were already created since `since`; the count and the insert are
+   * serialized across requests. "active_exists" means another active run for the symbol won the race.
+   */
+  insertQueued(input: {
+    symbol: string;
+    modules: ModuleKey[];
+    requestedBy: string | null;
+    since: Date;
+    dailyLimit: number;
+  }): Promise<RunRecord | "active_exists" | "limit_reached">;
   appendEvent(runId: string, type: string, message: string, data?: Record<string, unknown>): Promise<void>;
   markDispatched(runId: string): Promise<void>;
   recordDispatchFailure(runId: string, error: string): Promise<void>;
@@ -169,12 +177,16 @@ export function createResearchService(deps: {
       const active = await repo.findActive(company.symbol);
       if (active) return { status: 202, body: { runId: active.id, status: runStatus(active.status), cached: false } };
 
-      const usedToday = await repo.countCreatedSince(startOfIstDay(at));
-      if (usedToday >= deps.runsPerDay) throw researchLimitReached(deps.runsPerDay);
-
       const modules = input.modules?.length ? [...new Set(input.modules)] : [...MODULE_KEYS];
-      const inserted = await repo.insertQueued({ symbol: company.symbol, modules, requestedBy: meta?.requestedBy ?? null });
-      if (!inserted) {
+      const inserted = await repo.insertQueued({
+        symbol: company.symbol,
+        modules,
+        requestedBy: meta?.requestedBy ?? null,
+        since: startOfIstDay(at),
+        dailyLimit: deps.runsPerDay,
+      });
+      if (inserted === "limit_reached") throw researchLimitReached(deps.runsPerDay);
+      if (inserted === "active_exists") {
         const winner = await repo.findActive(company.symbol);
         if (winner) return { status: 202, body: { runId: winner.id, status: runStatus(winner.status), cached: false } };
         throw new Error("Research run insert conflicted but no active run was found");

@@ -100,6 +100,37 @@ describe.skipIf(!reachable)("research runs repository", () => {
       expect(await repo.claimById(run.id, "zta-new")).toBeNull();
     });
 
+    it("after a re-claim, the old worker's status, module and event writes no longer land; the new owner's do", async () => {
+      const { run } = await repo.createOrGetActive(S.CLM, [], null);
+      await repo.claimById(run.id, "zta-old");
+      await sql`UPDATE research_runs SET heartbeat_at = now() - interval '301 seconds' WHERE id = ${run.id}`;
+      expect(await repo.claimById(run.id, "zta-new")).toMatchObject({ worker_id: "zta-new" });
+
+      expect(await repo.heartbeat(run.id, "zta-old")).toBe(false);
+      expect(await repo.setStatusAsOwner(run.id, "zta-old", "completed", {}, { type: "run.completed", message: "stale" })).toBe(false);
+      expect(await repo.upsertModuleAsOwner(run.id, "zta-old", "bull_bear", "done", { payload: { stale: true } })).toBe(false);
+      expect(await repo.addEventAsOwner(run.id, "zta-old", "module.completed", "stale")).toBe(false);
+      expect((await repo.get(run.id))!).toMatchObject({ status: "processing_docs", worker_id: "zta-new" });
+      expect(await repo.listModules(run.id)).toEqual([]);
+      expect(await events(run.id)).toEqual([]);
+
+      expect(await repo.heartbeat(run.id, "zta-new")).toBe(true);
+      expect(await repo.upsertModuleAsOwner(run.id, "zta-new", "bull_bear", "done", { payload: { v: 1 }, cacheKey: "k" })).toBe(true);
+      expect(await repo.addEventAsOwner(run.id, "zta-new", "module.completed", "ok", { key: "bull_bear" })).toBe(true);
+      expect(await repo.setStatusAsOwner(run.id, "zta-new", "completed", {}, { type: "run.completed", message: "done", data: { status: "completed" } })).toBe(true);
+      expect((await repo.get(run.id))!.status).toBe("completed");
+      expect(await repo.listModules(run.id)).toMatchObject([{ module: "bull_bear", status: "done", payload: { v: 1 } }]);
+      expect(await events(run.id)).toEqual([
+        { type: "module.completed", data: { key: "bull_bear" } },
+        { type: "run.completed", data: { status: "completed" } },
+      ]);
+
+      // A finished run takes no further owner status writes, even from its own worker.
+      expect(await repo.setStatusAsOwner(run.id, "zta-new", "failed", { error: "late" }, { type: "run.failed", message: "late" })).toBe(false);
+      expect((await repo.get(run.id))!).toMatchObject({ status: "completed", error: null });
+      expect(await events(run.id)).toHaveLength(2);
+    });
+
     it("claimNext with SKIP LOCKED: two concurrent claimers never get the same run, and neither blocks", async () => {
       // Oldest possible created_at so these are the queue head; claims happen in transactions that are rolled
       // back, so no other run in the shared queue is ever modified.

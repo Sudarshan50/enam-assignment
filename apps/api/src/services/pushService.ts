@@ -1,3 +1,4 @@
+import { notFound } from "../http/errors";
 import type { Logger } from "../lib/logger";
 
 export interface StoredSubscription {
@@ -9,7 +10,7 @@ export interface StoredSubscription {
 export interface PushRepository {
   upsert(sub: StoredSubscription): Promise<void>;
   remove(endpoint: string): Promise<boolean>;
-  list(): Promise<StoredSubscription[]>;
+  find(endpoint: string): Promise<StoredSubscription | null>;
   markOk(endpoint: string): Promise<void>;
 }
 
@@ -23,7 +24,8 @@ export interface PushService {
   publicKey(): { enabled: boolean; publicKey: string | null };
   subscribe(sub: { endpoint: string; keys: { p256dh: string; auth: string } }): Promise<void>;
   unsubscribe(endpoint: string): Promise<void>;
-  sendTest(): Promise<{ sent: number; failed: number; pruned: number }>;
+  /** Sends one test notification to a subscription that is already stored; never to anyone else. */
+  sendTest(endpoint: string): Promise<{ sent: number; failed: number; pruned: number }>;
 }
 
 export function createPushService(deps: {
@@ -44,26 +46,21 @@ export function createPushService(deps: {
     async unsubscribe(endpoint) {
       await repo.remove(endpoint);
     },
-    async sendTest() {
+    async sendTest(endpoint) {
       if (!sender) return { sent: 0, failed: 0, pruned: 0 };
-      const payload = { title: "FINN", body: "Push notifications are working.", url: "/" };
-      let sent = 0;
-      let failed = 0;
-      let pruned = 0;
-      for (const sub of await repo.list()) {
-        const result = await sender.send(sub, payload);
-        if (result.ok) {
-          sent++;
-          await repo.markOk(sub.endpoint);
-        } else if (result.gone) {
-          pruned++;
-          await repo.remove(sub.endpoint);
-        } else {
-          failed++;
-          log.warn({ error: result.error }, "test push failed");
-        }
+      const sub = await repo.find(endpoint);
+      if (!sub) throw notFound("Push subscription");
+      const result = await sender.send(sub, { title: "FINN", body: "Push notifications are working.", url: "/" });
+      if (result.ok) {
+        await repo.markOk(sub.endpoint);
+        return { sent: 1, failed: 0, pruned: 0 };
       }
-      return { sent, failed, pruned };
+      if (result.gone) {
+        await repo.remove(sub.endpoint);
+        return { sent: 0, failed: 0, pruned: 1 };
+      }
+      log.warn({ error: result.error }, "test push failed");
+      return { sent: 0, failed: 1, pruned: 0 };
     },
   };
 }

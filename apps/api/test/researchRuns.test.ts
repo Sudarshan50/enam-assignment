@@ -32,11 +32,11 @@ function fakeRepo(seed: { runs?: RunRecord[]; createdToday?: number; insertConfl
     findLatestCompleted: async (symbol, since) =>
       runs.filter((r) => r.symbol === symbol && r.status === "completed" && r.createdAt >= since).at(-1) ?? null,
     findActive: async (symbol) => runs.find((r) => r.symbol === symbol && ACTIVE.includes(r.status)) ?? null,
-    countCreatedSince: async () => seed.createdToday ?? 0,
-    insertQueued: vi.fn(async ({ symbol, modules }) => {
+    insertQueued: vi.fn(async ({ symbol, modules, dailyLimit }) => {
+      if ((seed.createdToday ?? 0) >= dailyLimit) return "limit_reached" as const;
       if (seed.insertConflict) {
         runs.push(seed.insertConflict);
-        return null;
+        return "active_exists" as const;
       }
       const r = run({ symbol, modules, status: "queued", createdAt: NOW, updatedAt: NOW, dispatchAttempts: 0 });
       runs.push(r);

@@ -1,5 +1,5 @@
 import { sendNotification } from "web-push";
-import { pushRepo, type PendingDelivery } from "@finn/db/repositories/push";
+import { isPushServiceEndpoint, pushRepo, type PendingDelivery } from "@finn/db/repositories/push";
 import type { WorkerContext } from "../context";
 
 export interface PushTarget {
@@ -21,11 +21,13 @@ export function createWebPushSender(env: NodeJS.ProcessEnv): PushSender | null {
   const vapidDetails = { subject: VAPID_SUBJECT || "mailto:finn@example.com", publicKey: VAPID_PUBLIC_KEY, privateKey: VAPID_PRIVATE_KEY };
   return {
     async send(target, payload) {
+      if (!isPushServiceEndpoint(target.endpoint)) return { ok: false, gone: false, error: "Endpoint is not a known Web Push service; not sent" };
       try {
         await sendNotification({ endpoint: target.endpoint, keys: { p256dh: target.p256dh, auth: target.auth } }, payload, {
           vapidDetails,
           TTL: 6 * 60 * 60,
           urgency: "normal",
+          timeout: 30_000,
         });
         return { ok: true };
       } catch (err) {
@@ -73,7 +75,8 @@ function payloadFor(items: PendingDelivery[]): string {
 
 /**
  * Sends every alert that has no delivery record yet for each subscription. Each (alert, endpoint) is
- * claimed in notification_deliveries before sending, so a crash or a re-run can never double-send.
+ * claimed in notification_deliveries before sending, so concurrent runs never double-send; a claim abandoned
+ * mid-send is retried after PENDING_CLAIM_TIMEOUT_SECONDS, within the same attempt budget as failures.
  */
 export async function deliverPendingPushes(ctx: WorkerContext, sender: PushSender | null = createWebPushSender(ctx.env)): Promise<DeliverySummary> {
   const summary: DeliverySummary = { sent: 0, failed: 0, gone: 0, skipped: 0, configured: sender !== null };
@@ -97,7 +100,9 @@ export async function deliverPendingPushes(ctx: WorkerContext, sender: PushSende
     const first = items[0]!;
     const groups = items.length > BATCH_THRESHOLD ? [items] : items.map((i) => [i]);
     for (const group of groups) {
-      const result = await sender.send({ endpoint, p256dh: first.p256dh, auth: first.auth }, payloadFor(group));
+      const result: PushResult = await sender
+        .send({ endpoint, p256dh: first.p256dh, auth: first.auth }, payloadFor(group))
+        .catch((err: unknown) => ({ ok: false, gone: false, error: err instanceof Error ? err.message : String(err) }));
       if (result.ok) {
         for (const g of group) await repo.markDelivery(g.alertId, endpoint, "sent");
         await repo.markSubscriptionOk(endpoint);
