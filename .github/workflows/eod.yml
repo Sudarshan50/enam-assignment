@@ -1,0 +1,51 @@
+name: eod
+
+on:
+  schedule:
+    # 19:00 IST, after NSE usually publishes the bhavcopy.
+    - cron: "30 13 * * 1-5"
+    # 21:30 IST retry; --if-missing makes it a no-op when the 19:00 run already stored the session.
+    - cron: "0 16 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Session date (YYYY-MM-DD, optional; default today IST)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eod
+  cancel-in-progress: false
+
+jobs:
+  eod:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: End-of-day prices and alerts
+        env:
+          DATE: ${{ inputs.date }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          args=()
+          if [ -n "$DATE" ]; then args+=(--date "$DATE"); fi
+          if [ "$EVENT" = "schedule" ]; then args+=(--if-missing); fi
+          npm run worker -- eod "${args[@]}"

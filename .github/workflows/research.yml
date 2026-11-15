@@ -1,0 +1,56 @@
+name: research
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: "NSE symbol to research"
+        required: true
+      run_id:
+        description: "research_runs.id created by the API (optional)"
+        required: false
+  schedule:
+    # Fallback queue drain in case a dispatch was lost.
+    - cron: "*/30 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-${{ inputs.symbol || 'queue-drain' }}
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Research a symbol
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SYMBOL: ${{ inputs.symbol }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          if ! [[ "$SYMBOL" =~ ^[A-Za-z0-9\&-]{1,20}$ ]]; then echo "Invalid symbol" >&2; exit 2; fi
+          args=(--symbol "$SYMBOL")
+          if [ -n "$RUN_ID" ]; then args+=(--run-id "$RUN_ID"); fi
+          npm run worker -- research "${args[@]}"
+      - name: Drain the research queue
+        if: github.event_name == 'schedule'
+        run: npm run worker -- research-worker --once

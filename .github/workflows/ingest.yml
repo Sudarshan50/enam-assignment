@@ -1,0 +1,55 @@
+name: ingest
+
+on:
+  schedule:
+    # Every 15 minutes through the Indian filing day (09:00–23:15 IST), Mon–Fri.
+    - cron: "*/15 3-17 * * 1-5"
+    # Hourly otherwise, so late-night and weekend filings still land.
+    - cron: "0 0-2,18-23 * * 1-5"
+    - cron: "0 * * * 0,6"
+  workflow_dispatch:
+    inputs:
+      from:
+        description: "Backfill start (YYYY-MM-DD, optional)"
+        required: false
+      to:
+        description: "Backfill end (YYYY-MM-DD, optional)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Ingest announcements
+        env:
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+        run: |
+          args=()
+          if [ -n "$FROM" ]; then args+=(--from "$FROM"); fi
+          if [ -n "$TO" ]; then args+=(--to "$TO"); fi
+          npm run worker -- ingest "${args[@]}"
