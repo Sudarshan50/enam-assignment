@@ -10,7 +10,7 @@ import { ReasonChip, SymbolChip } from "@/components/ui/badge";
 import { Button, ButtonLink, IconButton } from "@/components/ui/button";
 import { digestApi } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { humanizeReason, istDateTime, timeAgo } from "@/lib/format";
+import { describeReasons, istDateTime, timeAgo } from "@/lib/format";
 
 const TIER_BAR = { act: "bg-act", know: "bg-know/45", noise: "bg-transparent" } as const;
 const TIER_TEXT = { act: "text-act", know: "text-know", noise: "text-noise" } as const;
@@ -117,10 +117,7 @@ export function DigestItem({
             {!isNoise ? (
               <div className="mt-3 flex flex-wrap items-center gap-1.5">
                 <span className={cn("kicker pr-1", TIER_TEXT[item.tier])}>{CATEGORY_LABELS[item.category]}</span>
-                {item.reasonCodes
-                  .map(humanizeReason)
-                  .filter((r): r is string => r !== null && r.toLowerCase() !== CATEGORY_LABELS[item.category].toLowerCase())
-                  .filter((r, i, all) => all.indexOf(r) === i)
+                {describeReasons(item.reasonCodes, CATEGORY_LABELS[item.category])
                   .slice(0, 4)
                   .map((r) => (
                     <ReasonChip key={r}>{r}</ReasonChip>

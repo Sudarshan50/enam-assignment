@@ -78,7 +78,12 @@ describe("signed percentages", () => {
     expect(humanizeReason("size:small_vs_mcap")).toBe("Small vs MCAP");
     expect(humanizeReason("seniority:kmp")).toBe("KMP");
     expect(humanizeReason("action:reaffirm")).toBe("Reaffirm");
-    expect(humanizeReason("llm_unavailable")).toBe("Rule-classified");
+    for (const code of ["llm_unavailable", "routine", "cluster:child", "subject_unknown:outcome_of_something", "financial_results", "llm:routine"]) {
+      expect(humanizeReason(code)).toBeNull();
+    }
+    expect(humanizeReason("pin:auditor_resignation")).toBe("Auditor resigned");
+    expect(humanizeReason("results_delayed")).toBe("Results delayed");
+    expect(humanizeReason("llm:cxo_exit")).toBe("CXO exit");
     expect(humanizeReason("qoq_revenue_up")).toBe("QoQ revenue up");
   });
 });

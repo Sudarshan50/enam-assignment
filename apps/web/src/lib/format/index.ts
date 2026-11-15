@@ -1,4 +1,5 @@
 export { formatInr, formatPct, fiscalQuarterLabel, pctChange } from "@finn/shared/format";
+export { describeReason as humanizeReason, describeReasons } from "@finn/shared/reasons";
 
 const IST = "Asia/Kolkata";
 
@@ -76,50 +77,6 @@ export function timeAgo(iso: string, now: Date = new Date()): string {
 }
 
 /** Classifier provenance (which rule or field matched); the category kicker already says what it is. */
-const HIDDEN_REASON_KEYS = new Set(["category", "subject", "text"]);
-
-const REASON_PHRASES: Record<string, string> = {
-  llm_unavailable: "Rule-classified",
-  routine: "Routine",
-  "seniority:kmp": "KMP",
-  "seniority:board_or_cxo": "Board / CXO",
-  "seniority:senior_management": "Senior management",
-};
-
-/**
- * "pat_yoy_+14.9%" → "PAT YoY +14.9%"; "size:small_vs_mcap" → "Small vs mcap". Returns null for codes
- * that only record how the classifier decided ("category:results", "subject:generic", "text:…").
- * Codes that already read as text pass through.
- */
-export function humanizeReason(code: string): string | null {
-  if (/\s/.test(code)) return code;
-  if (REASON_PHRASES[code]) return REASON_PHRASES[code];
-  const colon = code.indexOf(":");
-  if (colon > 0) {
-    const key = code.slice(0, colon).toLowerCase();
-    const value = code.slice(colon + 1);
-    if (HIDDEN_REASON_KEYS.has(key) || !value) return null;
-    if (key === "impact") {
-      const n = Number(value);
-      return !Number.isFinite(n) ? null : n >= 1.1 ? "Large for the company" : n <= 0.9 ? "Minor for the company" : null;
-    }
-    return humanizeReason(value);
-  }
-  const words = code.split("_").filter(Boolean);
-  const acronyms = new Set(["pat", "pbt", "nii", "ebitda", "ppop", "cfo", "ceo", "cxo", "md", "ncd", "xbrl", "agm", "egm", "esop", "mcap"]);
-  return words
-    .map((w, i) => {
-      const lower = w.toLowerCase();
-      if (lower === "yoy") return "YoY";
-      if (lower === "qoq") return "QoQ";
-      if (acronyms.has(lower)) return lower.toUpperCase();
-      return i === 0 ? lower.charAt(0).toUpperCase() + lower.slice(1) : lower;
-    })
-    .join(" ")
-    .replace(/(\d)x\b/g, "$1×")
-    .replace(/(^|\s)-(?=\d)/g, "$1\u2212");
-}
-
 const SMALL = ["Nothing", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
 export function numberWord(n: number): string {
   return SMALL[n] ?? String(n);
