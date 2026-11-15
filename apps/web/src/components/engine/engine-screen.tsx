@@ -32,7 +32,7 @@ const NOT_DONE = [
   "News, broker notes and model memory on the research side — primary documents only.",
   "A composite 'credibility score' — the Promise Ledger reports a fraction with its denominator.",
   "OCR for scanned PDFs — they're flagged, not silently skipped.",
-  "Multi-user accounts — one private demo link.",
+  "Multi-user accounts — the demo is open, with no sign-in.",
   "The BSE feed — NSE covers the portfolio.",
 ];
 

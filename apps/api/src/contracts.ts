@@ -34,8 +34,6 @@ export const HealthSchema = z.object({
 });
 export type Health = z.infer<typeof HealthSchema>;
 
-export const SessionRequestSchema = z.object({ token: z.string().min(1).max(256) });
-
 export const INTERACTION_ACTIONS = ["open", "dismiss", "undo_dismiss", "pin"] as const;
 export const InteractionActionSchema = z.enum(INTERACTION_ACTIONS);
 export type InteractionAction = z.infer<typeof InteractionActionSchema>;

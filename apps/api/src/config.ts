@@ -15,7 +15,6 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().min(1),
   DB_POOL_MAX: z.coerce.number().int().min(1).max(20).default(4),
 
-  DEMO_ACCESS_TOKEN: z.string().min(8, "DEMO_ACCESS_TOKEN must be at least 8 characters"),
   JOBS_SECRET: z.string().min(8, "JOBS_SECRET must be at least 8 characters"),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
   TRUST_PROXY: z.string().default("1"),
@@ -69,7 +68,6 @@ export function toAppConfig(config: Config): AppConfig {
     config.RESPONSE_VALIDATION ?? (isProduction ? "off" : config.NODE_ENV === "test" ? "strict" : "warn");
   const minute = 60_000;
   return {
-    demoAccessToken: config.DEMO_ACCESS_TOKEN,
     jobsSecret: config.JOBS_SECRET,
     corsOrigins: config.CORS_ORIGIN.split(",")
       .map((o) => o.trim().replace(/\/$/, ""))
@@ -79,7 +77,6 @@ export function toAppConfig(config: Config): AppConfig {
     jsonLimit: "32kb",
     rateLimits: {
       global: { windowMs: minute, limit: config.RATE_LIMIT_PER_MIN },
-      session: { windowMs: 15 * minute, limit: 10 },
       ask: { windowMs: minute, limit: config.ASK_RATE_LIMIT_PER_MIN },
       research: { windowMs: minute, limit: config.RESEARCH_RATE_LIMIT_PER_MIN },
     },

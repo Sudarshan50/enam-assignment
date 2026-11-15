@@ -12,7 +12,7 @@ import { loadConfig, toAppConfig } from "../src/config";
 import { buildContainer } from "../src/container";
 import { HttpError } from "../src/http/errors";
 import { REDACT_PATHS, silentLogger } from "../src/lib/logger";
-import { JOBS_SECRET, TOKEN } from "./helpers";
+import { JOBS_SECRET } from "./helpers";
 
 vi.mock("@finn/ai/ask/answer", () => ({ answerQuestion: vi.fn() }));
 vi.mock("web-push", () => {
@@ -27,7 +27,7 @@ vi.mock("web-push", () => {
   return { WebPushError, sendNotification: vi.fn() };
 });
 
-const BASE_ENV = { DATABASE_URL: "postgres://finn:finn@localhost:54329/finn", DEMO_ACCESS_TOKEN: TOKEN, JOBS_SECRET };
+const BASE_ENV = { DATABASE_URL: "postgres://finn:finn@localhost:54329/finn", JOBS_SECRET };
 const fakeSql = {} as Sql;
 const log = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() });
 
@@ -180,7 +180,7 @@ describe("configuration", () => {
   });
 
   it("lists every invalid variable without echoing secret values", () => {
-    const attempt = () => loadConfig({ DATABASE_URL: "", DEMO_ACCESS_TOKEN: "short-1", JOBS_SECRET: "x", PORT: "70000", GITHUB_REPO: "not a repo" });
+    const attempt = () => loadConfig({ DATABASE_URL: "", JOBS_SECRET: "x", PORT: "70000", GITHUB_REPO: "not a repo" });
     expect(attempt).toThrow(/^Invalid API environment:/);
     let message = "";
     try {
@@ -188,8 +188,7 @@ describe("configuration", () => {
     } catch (err) {
       message = (err as Error).message;
     }
-    for (const key of ["DATABASE_URL", "DEMO_ACCESS_TOKEN", "JOBS_SECRET", "PORT", "GITHUB_REPO"]) expect(message).toContain(`  ${key}:`);
-    expect(message).not.toContain("short-1");
+    for (const key of ["DATABASE_URL", "JOBS_SECRET", "PORT", "GITHUB_REPO"]) expect(message).toContain(`  ${key}:`);
   });
 
   it("derives the app config: origins, trust proxy, validation mode, limits", () => {
@@ -201,7 +200,6 @@ describe("configuration", () => {
     expect(app.responseValidation).toBe("warn");
     expect(app.rateLimits).toEqual({
       global: { windowMs: 60_000, limit: 120 },
-      session: { windowMs: 900_000, limit: 10 },
       ask: { windowMs: 60_000, limit: 3 },
       research: { windowMs: 60_000, limit: 10 },
     });

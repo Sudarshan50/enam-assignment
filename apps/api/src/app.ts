@@ -4,7 +4,6 @@ import express, { type Express } from "express";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 import type { AppDeps } from "./deps";
-import { ACCESS_HEADER } from "./middleware/auth";
 import { errorHandler, notFoundHandler } from "./middleware/errors";
 import { requestId } from "./middleware/requestId";
 import { healthHandler } from "./routes/health";
@@ -34,7 +33,7 @@ export function createApp(deps: AppDeps): Express {
       origin: (origin, cb) => cb(null, !origin || config.corsOrigins.includes(origin)),
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", ACCESS_HEADER, "Last-Event-ID", "X-Request-Id"],
+      allowedHeaders: ["Content-Type", "Last-Event-ID", "X-Request-Id"],
       exposedHeaders: ["X-Request-Id", "RateLimit", "RateLimit-Policy", "Retry-After"],
       maxAge: 600,
     }),

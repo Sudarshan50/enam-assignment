@@ -253,7 +253,7 @@ describe.skipIf(!dbUp)("research run events over SSE (real HTTP server, local da
     expect(await stream.ended).toContain("event: end");
   });
 
-  it("answers JSON errors before opening a stream: 404 unknown run, 400 bad id or lastEventId, 401 without token", async () => {
+  it("answers JSON errors before opening a stream: 404 unknown run, 400 bad id or lastEventId", async () => {
     const { app } = await serve();
     const { runId } = await createRun("queued");
     const missing = await request(app).get(`/api/v1/research-runs/${randomUUID()}/events`).set(auth);
@@ -266,6 +266,5 @@ describe.skipIf(!dbUp)("research run events over SSE (real HTTP server, local da
     const badCursor = await request(app).get(`/api/v1/research-runs/${runId}/events?lastEventId=-1`).set(auth);
     expect(badCursor.status).toBe(400);
     expect(badCursor.body.error.details[0].path).toBe("lastEventId");
-    expect((await request(app).get(`/api/v1/research-runs/${runId}/events`)).status).toBe(401);
   });
 });

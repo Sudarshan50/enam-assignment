@@ -5,7 +5,7 @@ A mobile-first investor agent for an 18-stock NSE portfolio, built for the ENAM 
 - **Push mode (Today).** NSE corporate announcements for the portfolio, sorted into *Act*, *Know* and *Noise*, with results cards built from exchange XBRL, management-change cards, and price, volume and filing alerts written in plain English.
 - **Pull mode (Ask).** Research any NSE ticker using only its annual reports and earnings-call transcripts. Every claim carries a verbatim, page-level citation. The **Promise Ledger** checks what management guided against what was later reported.
 
-Live demo: `https://enam.cflowx.in` (private; open the link you were sent, which sets a 30-day cookie). A short note for reviewers is in `COVERING.md`. The unlock link is not in this repository.
+Live demo: `https://enam.cflowx.in`. A short note for reviewers is in `COVERING.md`.
 
 ## Architecture
 
@@ -138,4 +138,4 @@ The GitHub Actions workflows (`ingest`, `eod`, `research`) are manual fallbacks 
 
 ## Deliberately left out
 
-Multi-user accounts (a single private demo token instead), intraday prices, OCR for scanned PDFs (they are detected and flagged), the BSE announcements feed (it blocks automated access), news and broker notes (excluded by the brief), a composite credibility score, and Supabase Realtime.
+Multi-user accounts, intraday prices, OCR for scanned PDFs (they are detected and flagged), the BSE announcements feed (it blocks automated access), news and broker notes (excluded by the brief), a composite credibility score, and Supabase Realtime.

@@ -64,7 +64,7 @@ describe("POST /api/v1/ask", () => {
 
 function open() {
   const rule = { windowMs: 60_000, limit: 10_000 };
-  return { global: rule, session: rule, ask: rule, research: rule };
+  return { global: rule, ask: rule, research: rule };
 }
 
 describe("POST /api/v1/interactions", () => {

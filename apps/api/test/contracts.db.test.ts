@@ -33,7 +33,7 @@ import {
   PreviewResponseSchema,
   VapidKeyResponseSchema,
 } from "../src/contracts";
-import { JOBS_SECRET, TOKEN, auth } from "./helpers";
+import { JOBS_SECRET, auth } from "./helpers";
 import { buildDbApp, dbReachable, expectParse } from "./support/db";
 
 const dbUp = await dbReachable();
@@ -291,8 +291,7 @@ describe.skipIf(!dbUp)("response contracts against the local database", async ()
       expect(expectParse(web.VapidKeyResponseSchema, (await get("/api/v1/push/vapid-public-key")).body, "web vapid")).toBeNull();
     });  });
 
-  it("every contract check above went through the demo-token gate", async () => {
-    expect((await request(app).get("/api/v1/holdings")).status).toBe(401);
-    expect((await request(app).get("/api/v1/holdings").set("Cookie", `finn_access=${TOKEN}`)).status).toBe(200);
+  it("serves holdings with no access cookie", async () => {
+    expect((await request(app).get("/api/v1/holdings")).status).toBe(200);
   });
 });

@@ -1,8 +1,8 @@
 // Live end-to-end checks against the real API through the Next dev server, driven over raw CDP.
 //
 //   1. npm run dev -w @finn/api                                     (repo root, port 4000)
-//   2. cd apps/web && API_ORIGIN=http://localhost:4000 DEMO_ACCESS_TOKEN=... npx next dev --port 3000
-//   3. cd apps/web && npm run e2e                                    (loads ../../.env for DEMO_ACCESS_TOKEN; never prints it)
+//   2. cd apps/web && API_ORIGIN=http://localhost:4000 npx next dev --port 3000
+//   3. cd apps/web && npm run e2e
 //
 // Options (env): E2E_BASE (default http://localhost:3000), E2E_ASK=0 to skip the one live LLM question,
 // CHROME (path to a Chrome binary), E2E_HEADFUL=1.
@@ -12,17 +12,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const BASE = (process.env.E2E_BASE ?? "http://localhost:3000").replace(/\/$/, "");
-const TOKEN = process.env.DEMO_ACCESS_TOKEN;
 const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const OUT = new URL("../.screenshots/e2e/", import.meta.url).pathname;
 const PORT = 9334;
 const ASK_ENABLED = process.env.E2E_ASK !== "0";
-
-if (!TOKEN) {
-  console.error("DEMO_ACCESS_TOKEN is not set. Run: node --env-file=../../.env e2e/run.mjs");
-  process.exit(2);
-}
-const redact = (s) => String(s).split(TOKEN).join("<token>").replace(/([?&]k=)[^&\s"]+/g, "$1<redacted>");
+const redact = (s) => String(s);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 mkdirSync(OUT, { recursive: true });
 for (const f of readdirSync(OUT)) if (f.startsWith("FAIL-")) rmSync(join(OUT, f));
@@ -240,24 +234,8 @@ async function run() {
 
   console.log(`FINN live e2e → ${BASE}\n`);
 
-  await step("locked without a cookie", async () => {
+  await step("Today loads with no sign-in", async () => {
     await send("Page.navigate", { url: `${BASE}/` });
-    await waitFor("locked page", () => /link/i.test(document.body?.innerText ?? "") && !document.querySelector("section[aria-labelledby='sec-act']"));
-    const status = await evaluate(async () => (await fetch("/api/v1/digest?window=24h")).status);
-    if (status !== 401) throw new Error(`expected /api/v1/digest → 401 without cookie, got ${status}`);
-    await screenshot("locked-390");
-    return "page shows the locked screen; API answers 401";
-  });
-  requests.clear(); // the expected 401 above is not a failure
-
-  await step("?k sets the cookie and lands on Today with live digest", async () => {
-    await send("Page.navigate", { url: `${BASE}/?k=${encodeURIComponent(TOKEN)}` });
-    await waitFor("redirect to clean URL", () => location.pathname === "/" && !location.search.includes("k="));
-    const { cookies } = await send("Network.getCookies", { urls: [BASE] });
-    const cookie = cookies.find((c) => c.name === "finn_access");
-    if (!cookie) throw new Error("finn_access cookie not set");
-    if (!cookie.httpOnly) throw new Error("finn_access cookie is not httpOnly");
-    if (cookie.value !== TOKEN) throw new Error("finn_access cookie value does not match the link token");
     const digest = await waitForNetwork("GET /digest", (r) => r.url.includes("/api/v1/digest") && r.status !== null);
     if (digest.status !== 200) throw new Error(`/digest → ${digest.status}`);
     const body = await responseJson(digest.requestId);
@@ -274,7 +252,7 @@ async function run() {
     if (zod.length) throw new Error(`contract errors: ${zod.map((e) => e.text).join(" | ")}`);
     await checkOverflow("Today");
     await screenshot("today-390");
-    return `httpOnly cookie set, URL cleaned; UI matches /digest: act ${counts.act}, know ${counts.know}${counts.caughtUp ? " (caught up)" : ""}`;
+    return `UI matches /digest: act ${counts.act}, know ${counts.know}${counts.caughtUp ? " (caught up)" : ""}`;
   });
 
   const openResults = () => {

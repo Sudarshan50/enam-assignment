@@ -1,6 +1,5 @@
 import { Router } from "express";
 import type { AppDeps } from "../../deps";
-import { requireDemoToken } from "../../middleware/auth";
 import { createRateLimiter } from "../../middleware/rateLimit";
 import { healthHandler } from "../health";
 import { alertsRouter } from "./alerts";
@@ -12,7 +11,6 @@ import { internalJobsRouter } from "./internalJobs";
 import { prefsRouter } from "./prefs";
 import { pushRouter } from "./push";
 import { researchRunsRouter } from "./researchRuns";
-import { sessionRouter } from "./session";
 
 export function createV1Router({ config, services, logger, shutdownSignal }: AppDeps): Router {
   const v1 = Router();
@@ -20,13 +18,9 @@ export function createV1Router({ config, services, logger, shutdownSignal }: App
 
   v1.use(createRateLimiter("global", limits.global));
 
-  // Open: health, token exchange, machine jobs (own secret).
+  // Health is open. Machine jobs keep their own bearer secret.
   v1.get("/healthz", healthHandler(services.health));
-  v1.use("/session", createRateLimiter("session", limits.session, "Too many sign-in attempts. Wait a few minutes."));
-  v1.use(sessionRouter({ demoAccessToken: config.demoAccessToken, secureCookie: config.isProduction }));
   v1.use("/internal", internalJobsRouter({ jobs: services.jobs, jobsSecret: config.jobsSecret }));
-
-  v1.use(requireDemoToken(config.demoAccessToken));
 
   v1.use(digestRouter(services));
   v1.use(companiesRouter(services));

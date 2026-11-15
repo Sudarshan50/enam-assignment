@@ -18,13 +18,12 @@ import type { ResearchEventsSource, SseOptions } from "./services/researchEventS
 import type { ResearchService } from "./services/researchService";
 
 export interface AppConfig {
-  demoAccessToken: string;
   jobsSecret: string;
   corsOrigins: string[];
   isProduction: boolean;
   trustProxy: number | boolean | string;
   jsonLimit: string;
-  rateLimits: { global: RateLimitRule; session: RateLimitRule; ask: RateLimitRule; research: RateLimitRule };
+  rateLimits: { global: RateLimitRule; ask: RateLimitRule; research: RateLimitRule };
   responseValidation: ResponseValidationMode;
   sse: SseOptions;
 }

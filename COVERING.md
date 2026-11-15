@@ -2,7 +2,7 @@
 
 FINN is a mobile-first brief for one NSE portfolio. Push mode ranks the day's filings. Pull mode answers questions from annual reports and earnings-call transcripts, and keeps a Promise Ledger of what management guided against what was later filed.
 
-The app is live at `https://enam.cflowx.in`. The private link that unlocks it (a 30-day cookie) is sent with this note and is not stored in the repository. On a phone, open that link once; after that the site stays unlocked on that device. The locked page is intentional.
+The app is live at `https://enam.cflowx.in`. Open that address directly. There is no sign-in.
 
 ## A short path through it
 

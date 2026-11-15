@@ -48,7 +48,7 @@ export function testEnv(overrides: Record<string, string> = {}): Config {
 }
 
 const OPEN = { windowMs: 60_000, limit: 100_000 };
-export const openLimits: AppConfig["rateLimits"] = { global: OPEN, session: OPEN, ask: OPEN, research: OPEN };
+export const openLimits: AppConfig["rateLimits"] = { global: OPEN, ask: OPEN, research: OPEN };
 
 export type FakeDispatcher = WorkerDispatcher & { dispatchResearch: ReturnType<typeof vi.fn>; fail: boolean };
 

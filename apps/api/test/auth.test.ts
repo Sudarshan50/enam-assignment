@@ -1,33 +1,14 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { ORIGIN, TOKEN, buildTestApp } from "./helpers";
+import { ORIGIN, buildTestApp } from "./helpers";
 
-describe("demo token gate", () => {
+describe("public API", () => {
   const app = buildTestApp();
 
-  it("rejects a request with no token", async () => {
+  it("serves holdings with no access cookie or header", async () => {
     const res = await request(app).get("/api/v1/holdings");
-    expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: { code: "unauthorized", message: expect.any(String) } });
-  });
-
-  it("rejects a wrong header and a wrong cookie", async () => {
-    expect((await request(app).get("/api/v1/holdings").set("x-finn-access", "nope")).status).toBe(401);
-    expect((await request(app).get("/api/v1/holdings").set("Cookie", "finn_access=nope")).status).toBe(401);
-    expect((await request(app).get("/api/v1/holdings").set("x-finn-access", `${TOKEN}x`)).status).toBe(401);
-  });
-
-  it("accepts the token as a header or as the finn_access cookie", async () => {
-    const viaHeader = await request(app).get("/api/v1/holdings").set("x-finn-access", TOKEN);
-    expect(viaHeader.status).toBe(200);
-    expect(viaHeader.body).toEqual([]);
-    const viaCookie = await request(app).get("/api/v1/holdings").set("Cookie", `finn_access=${TOKEN}`);
-    expect(viaCookie.status).toBe(200);
-  });
-
-  it("accepts a valid cookie even when a stale header is also sent", async () => {
-    const res = await request(app).get("/api/v1/holdings").set("x-finn-access", "old").set("Cookie", `finn_access=${TOKEN}`);
     expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
   });
 
   it("leaves health checks open", async () => {
@@ -44,39 +25,10 @@ describe("demo token gate", () => {
     expect(res.body.db).toBe("down");
   });
 
-  it("returns 404 in the standard error shape for unknown routes once authenticated", async () => {
-    const res = await request(app).get("/api/v1/nope").set("x-finn-access", TOKEN);
+  it("returns 404 in the standard error shape for unknown routes", async () => {
+    const res = await request(app).get("/api/v1/nope");
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("not_found");
-  });
-});
-
-describe("POST /api/v1/session", () => {
-  it("rejects a wrong token", async () => {
-    const res = await request(buildTestApp()).post("/api/v1/session").send({ token: "wrong" });
-    expect(res.status).toBe(401);
-    expect(res.headers["set-cookie"]).toBeUndefined();
-  });
-
-  it("sets an httpOnly, SameSite=Lax, 30-day cookie that then authenticates", async () => {
-    const app = buildTestApp();
-    const res = await request(app).post("/api/v1/session").send({ token: TOKEN });
-    expect(res.status).toBe(200);
-    const cookie = String(res.headers["set-cookie"]);
-    expect(cookie).toContain("finn_access=");
-    expect(cookie).toContain("HttpOnly");
-    expect(cookie).toContain("SameSite=Lax");
-    expect(cookie).toContain("Max-Age=2592000");
-    expect(cookie).not.toContain("Secure");
-
-    const agent = request.agent(app);
-    await agent.post("/api/v1/session").send({ token: TOKEN });
-    expect((await agent.get("/api/v1/holdings")).status).toBe(200);
-  });
-
-  it("marks the cookie Secure in production", async () => {
-    const res = await request(buildTestApp({}, { isProduction: true })).post("/api/v1/session").send({ token: TOKEN });
-    expect(String(res.headers["set-cookie"])).toContain("Secure");
   });
 });
 
@@ -105,9 +57,9 @@ describe("CORS and headers", () => {
 describe("rate limiting", () => {
   it("returns 429 in the standard error shape past the global limit", async () => {
     const app = buildTestApp({}, { rateLimits: { ...buildLimits(), global: { windowMs: 60_000, limit: 2 } } });
-    await request(app).get("/api/v1/holdings").set("x-finn-access", TOKEN);
-    await request(app).get("/api/v1/holdings").set("x-finn-access", TOKEN);
-    const res = await request(app).get("/api/v1/holdings").set("x-finn-access", TOKEN);
+    await request(app).get("/api/v1/holdings");
+    await request(app).get("/api/v1/holdings");
+    const res = await request(app).get("/api/v1/holdings");
     expect(res.status).toBe(429);
     expect(res.body.error.code).toBe("rate_limited");
   });
@@ -115,5 +67,5 @@ describe("rate limiting", () => {
 
 function buildLimits() {
   const open = { windowMs: 60_000, limit: 10_000 };
-  return { global: open, session: open, ask: open, research: open };
+  return { global: open, ask: open, research: open };
 }

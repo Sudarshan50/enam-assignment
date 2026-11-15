@@ -10,7 +10,6 @@ export const auth = { "x-finn-access": TOKEN };
 
 export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
-    demoAccessToken: TOKEN,
     jobsSecret: JOBS_SECRET,
     corsOrigins: [ORIGIN],
     isProduction: false,
@@ -18,7 +17,6 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     jsonLimit: "32kb",
     rateLimits: {
       global: { windowMs: 60_000, limit: 10_000 },
-      session: { windowMs: 60_000, limit: 10_000 },
       ask: { windowMs: 60_000, limit: 10_000 },
       research: { windowMs: 60_000, limit: 10_000 },
     },

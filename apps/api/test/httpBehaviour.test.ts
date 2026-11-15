@@ -18,43 +18,21 @@ const defaultLimits = toAppConfig(loadConfig({ DATABASE_URL: "postgres://x", DEM
 
 const sameLength = (s: string) => s.slice(0, -1) + (s.endsWith("x") ? "y" : "x");
 
-describe("demo token gate", () => {
+describe("public routes", () => {
   const app = buildTestApp();
-  const holdings = () => request(app).get("/api/v1/holdings");
 
-  it("accepts the token from the cookie alone or the header alone", async () => {
-    expect((await holdings().set("Cookie", `finn_access=${TOKEN}`)).status).toBe(200);
-    expect((await holdings().set("x-finn-access", TOKEN)).status).toBe(200);
-    expect((await holdings().set("x-finn-access", "stale-token").set("Cookie", `finn_access=${TOKEN}`)).status).toBe(200);
-    expect((await holdings().set("x-finn-access", TOKEN).set("Cookie", "finn_access=stale")).status).toBe(200);
+  it("serves holdings and unknown-route 404s with no access cookie", async () => {
+    expect((await request(app).get("/api/v1/holdings")).status).toBe(200);
+    expect((await request(app).get("/healthz")).status).toBe(200);
+    expect((await request(app).get("/api/v1/healthz")).status).toBe(200);
+    expect((await request(app).get("/api/v1/does-not-exist")).status).toBe(404);
   });
 
-  it.each([
-    ["missing", {}],
-    ["wrong header, same length", { "x-finn-access": sameLength(TOKEN) }],
-    ["wrong header, different length", { "x-finn-access": `${TOKEN}-longer` }],
-    ["wrong cookie, same length", { Cookie: `finn_access=${sameLength(TOKEN)}` }],
-    ["wrong cookie, different length", { Cookie: "finn_access=short" }],
-    ["empty cookie", { Cookie: "finn_access=" }],
-    ["token in the wrong cookie name", { Cookie: `session=${TOKEN}` }],
-    ["token as a bearer header", { Authorization: `Bearer ${TOKEN}` }],
-  ])("rejects %s with 401 unauthorized", async (_label, headers) => {
-    const res = await holdings().set(headers as Record<string, string>);
-    expect(res.status).toBe(401);
-    expect(res.body).toEqual({ error: { code: "unauthorized", message: "A valid access token is required" } });
-  });
-
-  it("compares in constant time regardless of length", () => {
+  it("compares secrets in constant time regardless of length", () => {
     expect(safeEqual(TOKEN, TOKEN)).toBe(true);
     expect(safeEqual(sameLength(TOKEN), TOKEN)).toBe(false);
     expect(safeEqual(`${TOKEN}x`, TOKEN)).toBe(false);
     expect(safeEqual("", TOKEN)).toBe(false);
-  });
-
-  it("leaves /healthz and /api/v1/healthz open but gates unknown /api/v1 routes before 404", async () => {
-    expect((await request(app).get("/healthz")).status).toBe(200);
-    expect((await request(app).get("/api/v1/healthz")).status).toBe(200);
-    expect((await request(app).get("/api/v1/does-not-exist")).status).toBe(401);
   });
 });
 
@@ -89,49 +67,6 @@ describe("internal jobs accept only Bearer JOBS_SECRET", () => {
   });
 });
 
-describe("POST and DELETE /api/v1/session", () => {
-  it("sets the token in an HttpOnly, SameSite=Lax, path=/ cookie, not Secure outside production", async () => {
-    const res = await request(buildTestApp()).post("/api/v1/session").send({ token: TOKEN });
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ ok: true });
-    const cookie = String(res.headers["set-cookie"]);
-    expect(cookie).toMatch(new RegExp(`^finn_access=${TOKEN};`));
-    expect(cookie).toContain("Path=/");
-    expect(cookie).toContain("HttpOnly");
-    expect(cookie).toContain("SameSite=Lax");
-    expect(cookie).not.toContain("Secure");
-  });
-
-  it("marks the cookie Secure in production, and clears it on DELETE with the same attributes", async () => {
-    const prod = buildTestApp({}, { isProduction: true });
-    expect(String((await request(prod).post("/api/v1/session").send({ token: TOKEN })).headers["set-cookie"])).toContain("Secure");
-    const cleared = await request(prod).delete("/api/v1/session");
-    expect(cleared.status).toBe(204);
-    const cookie = String(cleared.headers["set-cookie"]);
-    expect(cookie).toMatch(/^finn_access=;/);
-    expect(cookie).toContain("Expires=Thu, 01 Jan 1970");
-    expect(cookie).toContain("HttpOnly");
-    expect(cookie).toContain("Secure");
-    expect(cookie).toContain("SameSite=Lax");
-  });
-
-  it("rejects same-length and different-length wrong tokens without setting a cookie", async () => {
-    for (const token of [sameLength(TOKEN), "nope"]) {
-      const res = await request(buildTestApp()).post("/api/v1/session").send({ token });
-      expect(res.status).toBe(401);
-      expect(res.headers["set-cookie"]).toBeUndefined();
-    }
-  });
-
-  it("limits sign-in attempts to 10 per 15 minutes", async () => {
-    const app = buildTestApp({}, { rateLimits: { ...defaultLimits, global: { windowMs: 60_000, limit: 1000 } } });
-    for (let i = 0; i < 10; i++) expect((await request(app).post("/api/v1/session").send({ token: "wrong" })).status).toBe(401);
-    const blocked = await request(app).post("/api/v1/session").send({ token: TOKEN });
-    expect(blocked.status).toBe(429);
-    expect(blocked.body.error).toEqual({ code: "rate_limited", message: "Too many sign-in attempts. Wait a few minutes." });
-  });
-});
-
 describe("request validation", () => {
   const app = buildTestApp();
   const id = randomUUID();
@@ -139,7 +74,6 @@ describe("request validation", () => {
   const rule = { type: "price_move", scope: { kind: "portfolio" }, direction: "up", thresholdPct: 5 };
 
   const cases: [string, string, string, unknown, string[]][] = [
-    ["POST", "/api/v1/session", "missing token", {}, ["token"]],
     ["POST", "/api/v1/interactions", "empty seqId", { seqId: "", action: "open" }, ["seqId"]],
     ["POST", "/api/v1/interactions", "unknown action", { seqId: "1", action: "like" }, ["action"]],
     ["POST", "/api/v1/research-runs", "bad symbol", { symbol: "bad sym!" }, ["symbol"]],
@@ -172,8 +106,8 @@ describe("request validation", () => {
   it("puts the first issue in the message, without a path prefix for whole-body refinements", async () => {
     const patch = await request(app).patch(`/api/v1/alert-rules/${id}`).set(auth).send({});
     expect(patch.body.error.message).toBe("Nothing to update");
-    const field = await request(app).post("/api/v1/session").send({});
-    expect(field.body.error.message).toMatch(/^token: /);
+    const field = await request(app).post("/api/v1/ask").set(auth).send({});
+    expect(field.body.error.message).toMatch(/^symbol: /);
   });
 
   it.each([
@@ -357,10 +291,9 @@ describe("log redaction", () => {
     await request(app).get("/api/v1/holdings").set("x-finn-access", TOKEN);
     await request(app).get("/api/v1/holdings").set("x-finn-access", sameLength(TOKEN));
     await request(app).post("/api/v1/internal/jobs/noop").set("Authorization", `Bearer ${JOBS_SECRET}`);
-    await request(app).post("/api/v1/session").send({ token: TOKEN });
     await request(app).get("/api/v1/engine").set("x-finn-access", TOKEN);
 
-    expect(lines.length).toBeGreaterThanOrEqual(6);
+    expect(lines.length).toBeGreaterThanOrEqual(5);
     expect(raw()).not.toContain(TOKEN);
     expect(raw()).not.toContain(JOBS_SECRET);
     expect(raw()).not.toContain(sameLength(TOKEN));
@@ -368,20 +301,19 @@ describe("log redaction", () => {
     expect(headers.some((h) => h.cookie === "[redacted]")).toBe(true);
     expect(headers.some((h) => h["x-finn-access"] === "[redacted]")).toBe(true);
     expect(headers.some((h) => h.authorization === "[redacted]")).toBe(true);
-    const sessionLine = lines.find((l) => (l.req as { url?: string } | undefined)?.url === "/api/v1/session");
-    expect((sessionLine!.res as { headers: Record<string, unknown> }).headers["set-cookie"]).toBe("[redacted]");
   });
 
   it("logs the request id, 4xx as warn, 5xx as error with the error, and skips /healthz", async () => {
     const { app, lines } = capturedApp();
-    await request(app).get("/api/v1/holdings").set("x-finn-access", TOKEN).set("x-request-id", "trace-0001");
-    await request(app).get("/api/v1/holdings");
-    await request(app).get("/api/v1/engine").set("x-finn-access", TOKEN);
+    await request(app).get("/api/v1/holdings").set("x-request-id", "trace-0001");
+    await request(app).get("/api/v1/no-such");
+    await request(app).get("/api/v1/engine");
     await request(app).get("/healthz");
 
     const completed = lines.filter((l) => l.msg === "request completed" || l.msg === "request errored");
     const byUrl = (url: string) => completed.filter((l) => (l.req as { url: string }).url === url);
-    expect(byUrl("/api/v1/holdings").map((l) => l.level)).toEqual([30, 40]);
+    expect(byUrl("/api/v1/holdings").map((l) => l.level)).toEqual([30]);
+    expect(byUrl("/api/v1/no-such").map((l) => l.level)).toEqual([40]);
     expect((byUrl("/api/v1/holdings")[0]!.req as { id: string }).id).toBe("trace-0001");
     expect(byUrl("/api/v1/engine")[0]!.level).toBe(50);
     expect(lines.some((l) => l.msg === "request failed" && (l.err as { message: string }).message === "db exploded")).toBe(true);
