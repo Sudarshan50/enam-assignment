@@ -1,4 +1,4 @@
-import type { PromiseItem } from "@finn/shared";
+import type { ModuleRetry, PromiseItem } from "@finn/shared";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
@@ -29,9 +29,9 @@ const promise = (id: string, verdict: PromiseItem["verdict"], extra: Partial<Pro
 
 type Summary = { elapsed: number; delivered: number; missed: number; pending: number; quietlyDropped: number };
 
-function render(summary: Summary, promises: PromiseItem[], transcriptsUnread?: string[]): string {
+function render(summary: Summary, promises: PromiseItem[], transcriptsUnread?: string[], retry?: ModuleRetry): string {
   const ledger = { summary, promises, transcriptsUsed: ["Q1 FY27 concall", "Q2 FY27 concall"], transcriptsUnread };
-  return renderToStaticMarkup(createElement(CitationProvider, null, createElement(PromiseLedger, { ledger })));
+  return renderToStaticMarkup(createElement(CitationProvider, null, createElement(PromiseLedger, { ledger, retry })));
 }
 
 describe("promise ledger headline", () => {
@@ -79,6 +79,18 @@ describe("calls that could not be read", () => {
     expect(withPromises).toContain("Couldn&#x27;t read the Q4 FY26 earnings call, so its guidance isn&#x27;t counted here.");
     const empty = render(none, [], ["Q4 FY26 concall", "Q3 FY26 concall"]);
     expect(empty).toContain("Q4 FY26 earnings call, Q3 FY26 earnings call, so their guidance");
+  });
+
+  it("says whether FINN is still retrying them or has given up", () => {
+    const unread = ["Q4 FY26 concall"];
+    const later = new Date(Date.now() + 2 * 24 * 60 * 60_000).toISOString();
+    expect(render({ ...none, pending: 1 }, [promise("a", "pending")], unread, { status: "pending", attempts: 1, nextAttemptAt: later })).toContain(
+      "FINN retries it automatically; next try around",
+    );
+    expect(render({ ...none, pending: 1 }, [promise("a", "pending")], unread, { status: "dead", attempts: 5, nextAttemptAt: null })).toContain(
+      "FINN retried it 5 times without success. Refresh to start the research over.",
+    );
+    expect(render({ ...none, pending: 1 }, [promise("a", "pending")], unread)).toContain("Refresh to try again.");
   });
 
   it("says nothing when every call was read", () => {

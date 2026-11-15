@@ -1,11 +1,25 @@
 "use client";
 
-import type { ResearchModule } from "@finn/shared";
+import type { ModuleRetry, ResearchModule } from "@finn/shared";
 import { motion } from "motion/react";
 import { CircleDashed, TriangleAlert } from "lucide-react";
 import type { ReactNode } from "react";
 import type { z } from "zod";
 import { Skeleton, Notice } from "@/components/ui/states";
+import { istDateShort, istDateTime, istTime } from "@/lib/format";
+
+/** What FINN is doing about a module that failed or came back incomplete, in reader terms. */
+export function retryNote(retry: ModuleRetry | undefined, now: Date = new Date()): string | null {
+  if (!retry) return null;
+  if (retry.status === "dead") {
+    return `FINN retried it ${retry.attempts} ${retry.attempts === 1 ? "time" : "times"} without success. Refresh to start the research over.`;
+  }
+  if (!retry.nextAttemptAt) return "FINN retries it automatically.";
+  const next = new Date(retry.nextAttemptAt);
+  if (next <= now) return "FINN is retrying it now.";
+  const when = istDateShort(next) === istDateShort(now) ? `${istTime(next)} IST` : istDateTime(next);
+  return `FINN retries it automatically; next try around ${when}.`;
+}
 
 export function ModuleFrame<S extends z.ZodType>({
   index,
@@ -34,9 +48,14 @@ export function ModuleFrame<S extends z.ZodType>({
       </Notice>
     );
   } else if (status === "failed") {
+    const retry = retryNote(module?.retry);
     body = (
-      <Notice tone="neg" icon={<TriangleAlert className="size-4" />} title="This module failed">
-        {module?.error ?? "The rest of the research is unaffected. Rebuild to retry."}
+      <Notice
+        tone="neg"
+        icon={<TriangleAlert className="size-4" />}
+        title={module?.retry?.status === "pending" ? "This module failed; FINN is retrying it" : "This module failed"}
+      >
+        {retry ? `The rest of the research is unaffected. ${retry}` : (module?.error ?? "The rest of the research is unaffected. Refresh to retry.")}
       </Notice>
     );
   } else if (status === "insufficient_sources") {

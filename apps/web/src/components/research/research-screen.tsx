@@ -162,7 +162,7 @@ export function ResearchScreen({ symbol }: { symbol: string }) {
           module={moduleOf(run, "promise_ledger")}
           schema={PromiseLedgerPayloadSchema}
         >
-          {(ledger) => <PromiseLedger ledger={ledger} />}
+          {(ledger) => <PromiseLedger ledger={ledger} retry={moduleOf(run, "promise_ledger")?.retry} />}
         </ModuleFrame>
 
         <ModuleFrame

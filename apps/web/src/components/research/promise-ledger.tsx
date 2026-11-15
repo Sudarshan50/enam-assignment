@@ -1,6 +1,6 @@
 "use client";
 
-import { PromiseLedgerPayloadSchema, type GuidanceMetric, type PromiseItem, type Verdict } from "@finn/shared";
+import { PromiseLedgerPayloadSchema, type GuidanceMetric, type ModuleRetry, type PromiseItem, type Verdict } from "@finn/shared";
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import type { z } from "zod";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 import { callLabel, STATEMENT_LABEL } from "@/lib/labels";
 import { QuoteShown } from "./citation-sheet";
 import { CitationChips } from "./claim";
+import { retryNote } from "./module-frame";
 
 type Ledger = z.output<typeof PromiseLedgerPayloadSchema>;
 
@@ -148,7 +149,7 @@ function PromiseRow({ p }: { p: PromiseItem }) {
 
 type Filter = "all" | Verdict;
 
-export function PromiseLedger({ ledger }: { ledger: Ledger }) {
+export function PromiseLedger({ ledger, retry }: { ledger: Ledger; retry?: ModuleRetry }) {
   const [filter, setFilter] = useState<Filter>("all");
   const { summary, promises } = ledger;
   const scored = promises.filter((p) => p.verdict !== "not_scored");
@@ -166,8 +167,8 @@ export function PromiseLedger({ ledger }: { ledger: Ledger }) {
   const unreadNote =
     unread.length > 0 ? (
       <p className="mt-3 text-[13px] leading-relaxed text-amber">
-        Couldn&apos;t read the {unread.map(callLabel).join(", ")}, so {unread.length === 1 ? "its" : "their"} guidance isn&apos;t counted here. It is retried on
-        the next refresh.
+        Couldn&apos;t read the {unread.map(callLabel).join(", ")}, so {unread.length === 1 ? "its" : "their"} guidance isn&apos;t counted here.{" "}
+        {retryNote(retry) ?? "Refresh to try again."}
       </p>
     ) : null;
 
