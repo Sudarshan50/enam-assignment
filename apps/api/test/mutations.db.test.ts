@@ -475,7 +475,9 @@ describe.skipIf(!dbUp)("writes against the local database", async () => {
         expect(banks.body.definition.scope).toEqual({ kind: "statement_family", family: "banking" });
         const bankHoldings = await tx<{ symbol: string }[]>`
           SELECT h.symbol FROM holdings h JOIN companies c USING (symbol) WHERE c.statement_family = 'banking' ORDER BY h.symbol`;
-        expect(banks.body.resolvedSymbols).toEqual(bankHoldings.map((r) => r.symbol));
+        // Other suites add and remove ZT-prefixed holdings concurrently, so compare only real holdings.
+        const real = (symbols: string[]) => symbols.filter((s) => !s.startsWith("ZT"));
+        expect(real(banks.body.resolvedSymbols)).toEqual(real(bankHoldings.map((r) => r.symbol)));
       }));
   });
 

@@ -5,7 +5,6 @@ import { closeDb, getDb } from "@finn/db";
 import { MODULE_KEYS, ResearchRunSchema } from "@finn/shared";
 import { StartRunResponseSchema } from "../../web/src/lib/api/schemas";
 import { CompanyResearchSchema, CreateResearchRunResponseSchema } from "../src/contracts";
-import { startOfIstDay } from "../src/lib/time";
 import type { ResearchRepository } from "../src/services/researchService";
 import { JOBS_SECRET, TOKEN, auth } from "./helpers";
 import { buildDbApp, cleanupPrefix, dbReachable, expectParse, fakeDispatcher, insertCompany } from "./support/db";
@@ -230,9 +229,13 @@ describe.skipIf(!dbUp)("research runs against the local database", async () => {
     let arrivals = 0;
     let release!: () => void;
     const allArrived = new Promise<void>((r) => (release = r));
+    // Counting from the burst's start keeps other suites' earlier runs (and their cleanup) out of the quota.
+    const burstStart = new Date(Date.now() - 1000);
+    const allowed = 2;
     // Every request passes the cache and active-run checks before any of them reaches the count + insert.
     const wrapRepo = (repo: ResearchRepository): ResearchRepository => ({
       ...repo,
+      insertQueued: (args) => repo.insertQueued({ ...args, since: burstStart, dailyLimit: allowed }),
       async findActive(symbol) {
         const found = await repo.findActive(symbol);
         if (symbols.includes(symbol) && arrivals < symbols.length) {
@@ -242,9 +245,7 @@ describe.skipIf(!dbUp)("research runs against the local database", async () => {
         return found;
       },
     });
-    const [today] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM research_runs WHERE created_at >= ${startOfIstDay(new Date())}`;
-    const allowed = 2;
-    const { app } = await buildDbApp(sql, { runsPerDay: today!.n + allowed, wrapRepo });
+    const { app } = await buildDbApp(sql, { runsPerDay: 1000, wrapRepo });
 
     const results = await Promise.all(symbols.map((s) => post(app, s)));
     const accepted = results.filter((r) => r.status === 202);
