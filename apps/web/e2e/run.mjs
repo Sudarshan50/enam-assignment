@@ -6,74 +6,19 @@
 //
 // Options (env): E2E_BASE (default http://localhost:3000), E2E_ASK=0 to skip the one live LLM question,
 // CHROME (path to a Chrome binary), E2E_HEADFUL=1.
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { launch, sleep } from "./cdp.mjs";
 
 const BASE = (process.env.E2E_BASE ?? "http://localhost:3000").replace(/\/$/, "");
-const CHROME = process.env.CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const OUT = new URL("../.screenshots/e2e/", import.meta.url).pathname;
-const PORT = 9334;
 const ASK_ENABLED = process.env.E2E_ASK !== "0";
 const redact = (s) => String(s);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 mkdirSync(OUT, { recursive: true });
 for (const f of readdirSync(OUT)) if (f.startsWith("FAIL-")) rmSync(join(OUT, f));
 
-const profile = mkdtempSync(join(tmpdir(), "finn-e2e-"));
-const chrome = spawn(
-  CHROME,
-  [
-    ...(process.env.E2E_HEADFUL ? [] : ["--headless=new"]),
-    "--disable-gpu",
-    "--hide-scrollbars",
-    "--no-first-run",
-    "--no-default-browser-check",
-    `--remote-debugging-port=${PORT}`,
-    `--user-data-dir=${profile}`,
-    "about:blank",
-  ],
-  { stdio: "ignore" },
-);
-
-let ws;
-let seq = 0;
-const pending = new Map();
-const listeners = new Map();
-const on = (method, fn) => listeners.set(method, [...(listeners.get(method) ?? []), fn]);
-
-function send(method, params = {}) {
-  return new Promise((resolve, reject) => {
-    const id = ++seq;
-    pending.set(id, (m) => (m.error ? reject(new Error(`${method}: ${m.error.message}`)) : resolve(m.result)));
-    ws.send(JSON.stringify({ id, method, params }));
-  });
-}
-
-async function connect() {
-  let wsUrl;
-  for (let i = 0; i < 75 && !wsUrl; i++) {
-    await sleep(200);
-    try {
-      const pages = await (await fetch(`http://127.0.0.1:${PORT}/json`)).json();
-      wsUrl = pages.find((p) => p.type === "page")?.webSocketDebuggerUrl;
-    } catch {}
-  }
-  if (!wsUrl) throw new Error("Chrome did not expose a page target");
-  ws = new WebSocket(wsUrl);
-  await new Promise((r, j) => {
-    ws.addEventListener("open", r, { once: true });
-    ws.addEventListener("error", j, { once: true });
-  });
-  ws.addEventListener("message", (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.id && pending.has(msg.id)) {
-      pending.get(msg.id)(msg);
-      pending.delete(msg.id);
-    } else if (msg.method) for (const fn of listeners.get(msg.method) ?? []) fn(msg.params);
-  });
-}
+const browser = await launch({ port: 9334 });
+const { send, on, evaluate, waitFor, viewport } = browser;
 
 let phase = "setup";
 const requests = new Map(); // requestId -> { url, method, status, mime, phase, sse: [] }
@@ -115,29 +60,6 @@ const isBadApi = (r) => (r.status !== null && r.status >= 400) || (r.failed && r
 // ---------------------------------------------------------------------------------------------
 // Page helpers (functions are serialised into the page)
 // ---------------------------------------------------------------------------------------------
-async function evaluate(fn, ...args) {
-  // DOM nodes can't be returned by value; predicates may return one to mean "found".
-  const expression = `(async () => { const v = await (${fn.toString()})(...${JSON.stringify(args)}); return v instanceof Node ? true : v; })()`;
-  const { result, exceptionDetails } = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-  if (exceptionDetails) throw new Error(redact(exceptionDetails.exception?.description ?? exceptionDetails.text));
-  return result.value;
-}
-
-async function waitFor(label, fn, args = [], timeout = 30_000) {
-  const started = Date.now();
-  let last;
-  while (Date.now() - started < timeout) {
-    try {
-      last = await evaluate(fn, ...args);
-      if (last) return last;
-    } catch (e) {
-      last = e.message;
-    }
-    await sleep(250);
-  }
-  throw new Error(`Timed out waiting for ${label}${last ? ` (last: ${JSON.stringify(last).slice(0, 200)})` : ""}`);
-}
-
 async function waitForNetwork(label, predicate, timeout = 30_000) {
   const started = Date.now();
   while (Date.now() - started < timeout) {
@@ -155,14 +77,8 @@ async function navigate(path, ready) {
 }
 
 async function screenshot(name) {
-  const { data } = await send("Page.captureScreenshot", { format: "png" });
-  writeFileSync(join(OUT, `${name}.png`), Buffer.from(data, "base64"));
+  await browser.screenshot(join(OUT, `${name}.png`));
   shots.push(`${name}.png`);
-}
-
-async function viewport(width, height, mobile) {
-  await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: mobile ? 2 : 1, mobile });
-  await send("Emulation.setTouchEmulationEnabled", { enabled: mobile });
 }
 
 async function responseJson(requestId) {
@@ -170,9 +86,7 @@ async function responseJson(requestId) {
   return JSON.parse(base64Encoded ? Buffer.from(body, "base64").toString("utf8") : body);
 }
 
-async function pressEscape() {
-  for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
-}
+const pressEscape = () => browser.pressKey("Escape", "Escape", 27);
 
 function overflowReport() {
   const vw = window.innerWidth;
@@ -227,7 +141,6 @@ async function checkOverflow(label) {
 }
 
 async function run() {
-  await connect();
   track();
   await Promise.all([send("Page.enable"), send("Runtime.enable"), send("Network.enable"), send("Log.enable")]);
   await viewport(390, 844, true);
@@ -313,7 +226,12 @@ async function run() {
 
   await step("dismiss + Undo", async () => {
     await navigate("/?window=7d", () => document.querySelectorAll("section[aria-labelledby='sec-know'] article").length > 0);
-    await sleep(800);
+    // A click before hydration lands on server HTML and does nothing.
+    await waitFor("hydrated dismiss button", () => {
+      const b = document.querySelector("section[aria-labelledby='sec-know'] button[aria-label^='Dismiss ']");
+      return b && Object.keys(b).some((k) => k.startsWith("__reactProps"));
+    });
+    await sleep(400);
     const target = await evaluate(() => {
       const article = [...document.querySelectorAll("section[aria-labelledby='sec-know'] article")].find((a) => a.querySelector("button[aria-label^='Dismiss ']"));
       if (!article) return null;
@@ -355,7 +273,10 @@ async function run() {
     await navigate("/ask/CDSL", () => /Research ready/.test(document.body.innerText));
     const state = await waitFor("modules rendered", () => {
       const sec = (id) => document.getElementById(id);
-      const ledger = sec("promise_ledger")?.querySelector("[aria-label^='Delivered '], [aria-label^='None due yet']")?.getAttribute("aria-label");
+      const ledgerEl = sec("promise_ledger");
+      const ledger =
+        ledgerEl?.querySelector("[aria-label^='Delivered '], [aria-label^='None due yet']")?.getAttribute("aria-label") ??
+        (/No numeric guidance to track/.test(ledgerEl?.innerText ?? "") ? "no numeric guidance" : null);
       const snapshot = sec("financial_snapshot")?.innerText ?? "";
       const bb = sec("bull_bear");
       const chips = bb ? bb.querySelectorAll("button[aria-label^='Source:']").length : 0;
@@ -574,15 +495,7 @@ try {
   console.error("e2e aborted:", redact(e.stack ?? e.message));
   exitCode = 1;
 } finally {
-  try {
-    ws?.close();
-  } catch {}
-  const exited = new Promise((r) => (chrome.exitCode !== null ? r() : chrome.once("exit", r)));
-  chrome.kill();
-  await Promise.race([exited, sleep(5000)]);
-  try {
-    rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-  } catch {}
+  await browser.close();
 }
 
 const failed = results.filter((r) => !r.ok);

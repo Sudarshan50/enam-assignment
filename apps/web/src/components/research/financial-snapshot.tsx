@@ -12,7 +12,14 @@ import { ClaimLine } from "./claim";
 type Snapshot = z.output<typeof FinancialSnapshotPayloadSchema>;
 
 function formatByUnit(unit: string) {
-  return (v: number | null) => (v == null ? "—" : unit === "inr" ? formatInr(v, { compact: true }) : unit === "pct" ? formatPlainPct(v) : unit === "x" ? `${v.toFixed(1)}×` : v.toLocaleString("en-IN"));
+  return (v: number | null) => {
+    if (v == null) return "—";
+    if (unit === "inr_crore") return formatInr(v * 1e7, { compact: true });
+    if (unit === "inr") return formatInr(v, { compact: true });
+    if (unit === "pct") return formatPlainPct(v);
+    if (unit === "x") return `${v.toFixed(1)}×`;
+    return v.toLocaleString("en-IN", { maximumFractionDigits: 1 });
+  };
 }
 
 function isSecondary(source: string) {
@@ -22,22 +29,28 @@ function isSecondary(source: string) {
 export function FinancialSnapshot({ data, symbol }: { data: Snapshot; symbol: string }) {
   const [active, setActive] = useState(data.series[0]?.key ?? "");
   const series = data.series.find((s) => s.key === active) ?? data.series[0];
+  const sharedSource = data.headline.length > 0 && data.headline.every((h) => h.source === data.headline[0]!.source) ? data.headline[0]!.source : null;
 
   return (
     <div className="space-y-8">
-      <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-rule bg-rule">
-        {data.headline.map((h) => (
-          <div key={h.label} className="bg-paper px-4 py-4">
-            <dt className="kicker text-ink-faint">{h.label}</dt>
-            <dd className="mt-1.5 font-mono text-[22px] leading-none text-ink tnum">
-              <CountUp value={h.value} format={formatByUnit(h.unit)} id={`${symbol}-fin-${h.label}`} />
-            </dd>
-            <dd className={cn("mt-2 font-mono text-[10px]", isSecondary(h.source) ? "text-amber/80" : "text-ink-faint")}>
-              {h.period} · {h.source}
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <div>
+        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-rule bg-rule">
+          {data.headline.map((h) => (
+            <div key={h.label} className="min-w-0 bg-paper px-3.5 py-3.5 xs:px-4 xs:py-4">
+              <dt className="kicker text-ink-faint">{h.label}</dt>
+              <dd className="mt-1.5 font-mono text-[20px] leading-none text-ink tnum xs:text-[22px]">
+                <CountUp value={h.value} format={formatByUnit(h.unit)} id={`${symbol}-fin-${h.label}`} />
+              </dd>
+              <dd className={cn("mt-2 font-mono text-[10.5px]", isSecondary(h.source) ? "text-amber/80" : "text-ink-faint")}>
+                {sharedSource ? h.period : `${h.period} · ${h.source}`}
+              </dd>
+            </div>
+          ))}
+        </dl>
+        {sharedSource ? (
+          <p className={cn("mt-2.5 font-mono text-[10.5px]", isSecondary(sharedSource) ? "text-amber/80" : "text-ink-faint")}>Source: {sharedSource}</p>
+        ) : null}
+      </div>
 
       {series ? (
         <div>

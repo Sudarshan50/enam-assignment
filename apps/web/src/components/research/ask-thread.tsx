@@ -125,7 +125,7 @@ export function AskThread({ symbol, companyName }: { symbol: string; companyName
         className="sticky bottom-[calc(76px+env(safe-area-inset-bottom))] z-20 mt-8 lg:bottom-6"
         aria-label={`Ask a question about ${companyName}`}
       >
-        <div className="flex items-end gap-2 rounded-[22px] border border-rule-strong bg-paper-raised/95 p-1.5 pl-4 shadow-[0_18px_50px_rgba(0,0,0,0.55)] backdrop-blur focus-within:border-ink-faint">
+        <div className="flex items-end gap-2 rounded-[22px] border border-rule-strong bg-paper-raised p-1.5 pl-4 shadow-[0_18px_50px_rgba(0,0,0,0.55)] focus-within:border-ink-faint">
           <label htmlFor="ask-input" className="sr-only">
             Question about {companyName}
           </label>
@@ -142,7 +142,7 @@ export function AskThread({ symbol, companyName }: { symbol: string; companyName
               }
             }}
             placeholder={`Ask about ${symbol}…`}
-            className="max-h-32 min-h-11 flex-1 resize-none bg-transparent py-3 text-[15px] text-ink placeholder:text-ink-faint focus:outline-none"
+            className="max-h-32 min-h-11 flex-1 resize-none bg-transparent py-3 text-[16px] text-ink placeholder:text-ink-faint focus:outline-none"
           />
           <button
             type="submit"

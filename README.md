@@ -92,7 +92,9 @@ npm run dev -w @finn/web             # :3000, or NEXT_PUBLIC_USE_MOCKS=1 for the
 npm run worker -- ingest             # see `npm run worker -- --help`
 ```
 
-Tests: `npx vitest run` (about 1,430 tests over packages, API and worker; database tests use the local Postgres) and `npm test -w @finn/web` (81 web tests). CI runs both, plus typechecks, the mock contract check and the web build.
+Tests: `npx vitest run` (about 1,480 tests over packages, API and worker; database tests use the local Postgres) and `npm test -w @finn/web` (90 web tests). CI runs both, plus typechecks, the mock contract check and two web builds: one in mock mode and one production build without mocks.
+
+End to end, against a running web app (`E2E_BASE`, default `http://localhost:3000`): `npm run e2e -w @finn/web` drives the real flows (digest, dismiss and undo, research, citations, SSE, one live question, an alert rule round trip), and `npm run e2e:mobile -w @finn/web` checks every screen, sheet and popover at 320, 360, 375, 390 and 414px for overflow, clipped or squeezed text, small tap targets and inputs that make iOS zoom. Both save screenshots under `apps/web/.screenshots/`.
 
 ## Production (EC2)
 

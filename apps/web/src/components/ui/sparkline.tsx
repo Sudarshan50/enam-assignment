@@ -1,9 +1,11 @@
 import { useId } from "react";
+import { cn } from "@/lib/cn";
 
 /** A 30-session price line. Colour follows the period's direction; a dot marks the last close. */
-export function Sparkline({ values, width = 84, height = 28, label }: { values: number[]; width?: number; height?: number; label: string }) {
+/** `className` may set a narrower CSS width; the line stretches to fit and keeps its stroke weight. */
+export function Sparkline({ values, width = 84, height = 28, label, className }: { values: number[]; width?: number; height?: number; label: string; className?: string }) {
   const gid = useId();
-  if (values.length < 2) return <span className="inline-block" style={{ width, height }} aria-hidden />;
+  if (values.length < 2) return <span className={cn("inline-block", className)} style={{ width: className ? undefined : width, height }} aria-hidden />;
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || 1;
@@ -16,7 +18,15 @@ export function Sparkline({ values, width = 84, height = 28, label }: { values: 
   const lastX = x(values.length - 1);
   const lastY = y(values[values.length - 1]!);
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label} className="overflow-visible">
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio="none"
+      role="img"
+      aria-label={label}
+      className={cn("overflow-visible", className)}
+    >
       <defs>
         <linearGradient id={gid} x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.22" />
@@ -24,7 +34,7 @@ export function Sparkline({ values, width = 84, height = 28, label }: { values: 
         </linearGradient>
       </defs>
       <path d={`${d} L${lastX.toFixed(1)},${height} L${pad},${height} Z`} fill={`url(#${gid})`} />
-      <path d={d} fill="none" stroke={color} strokeWidth="1.25" strokeLinejoin="round" strokeLinecap="round" />
+      <path d={d} fill="none" stroke={color} strokeWidth="1.25" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
       <circle cx={lastX} cy={lastY} r="2" fill={color} />
     </svg>
   );

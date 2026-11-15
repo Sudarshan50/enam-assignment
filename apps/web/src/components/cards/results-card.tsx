@@ -19,7 +19,7 @@ function DerivedBadge({ metric, definition }: { metric: ResultsMetric; definitio
     <InfoPopover
       label={`How ${metric.label} is computed`}
       trigger={
-        <span className="inline-flex h-5 items-center gap-1 rounded-full border border-amber/35 px-1.5 font-mono text-[9.5px] tracking-[0.08em] text-amber uppercase">
+        <span className="inline-flex h-5 items-center gap-1 rounded-full border border-amber/35 px-1.5 font-mono text-[10px] tracking-[0.08em] text-amber uppercase">
           derived
           <Info className="size-3" aria-hidden />
         </span>
@@ -42,13 +42,13 @@ function MetricRow({ metric, itemId, definition }: { metric: ResultsMetric; item
           {metric.current.derived ? <DerivedBadge metric={metric} definition={definition} /> : null}
         </span>
       </th>
-      <td className="py-3 pl-2 text-right align-middle font-mono text-[15px] text-ink tnum whitespace-nowrap">
+      <td className="py-3 pl-2 text-right align-middle font-mono text-[14px] text-ink tnum whitespace-nowrap xs:text-[15px]">
         <CountUp value={metric.current.value} format={(v) => formatInr(v)} id={`${itemId}-${metric.key}`} />
       </td>
-      <td className="py-3 pl-3 text-right align-middle text-[13px]">
+      <td className="py-3 pl-2 text-right align-middle text-[12.5px] whitespace-nowrap xs:pl-3 xs:text-[13px]">
         <Delta value={metric.qoqPct} />
       </td>
-      <td className="py-3 pl-3 text-right align-middle text-[13px]">
+      <td className="py-3 pl-2 text-right align-middle text-[12.5px] whitespace-nowrap xs:pl-3 xs:text-[13px]">
         <Delta value={metric.yoyPct} />
       </td>
     </tr>
@@ -94,7 +94,7 @@ export function ResultsCard({ card, item }: { card: ResultsCardData; item: Diges
               <th scope="col" className="pb-2 text-left font-normal">
                 <span className="sr-only">Metric</span>
               </th>
-              <th scope="col" className="pb-2 text-right font-normal">
+              <th scope="col" className="pb-2 text-right font-normal whitespace-nowrap">
                 {card.periodLabel}
               </th>
               <th scope="col" className="pb-2 text-right font-normal">
@@ -131,7 +131,7 @@ export function ResultsCard({ card, item }: { card: ResultsCardData; item: Diges
       {card.read ? <CardProse>{card.read}</CardProse> : null}
 
       {card.status === "ready" ? (
-        <p className="font-mono text-[11px] leading-relaxed text-ink-faint">
+        <p className="font-mono text-[11px] leading-relaxed text-ink-faint [overflow-wrap:anywhere]">
           Source: NSE integrated filing (XBRL{xbrlRef ? ` · ${xbrlRef}` : ""}). QoQ and YoY use each quarter&apos;s own filing; consolidated basis
           throughout.
         </p>

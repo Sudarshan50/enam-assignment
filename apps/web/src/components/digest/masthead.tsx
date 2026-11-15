@@ -68,9 +68,14 @@ export function Masthead({
 
       <div className="mt-5 flex items-center justify-between gap-3">
         <Segmented label="Digest window" value={window} options={WINDOWS} onChange={onWindowChange} />
-        <div className="flex items-center gap-1">
-          <span className="font-mono text-[11px] text-ink-faint" suppressHydrationWarning>
-            {digest?.asOf ? `as of ${istTime(digest.asOf)} IST` : ""}
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="font-mono text-[11px] whitespace-nowrap text-ink-faint" suppressHydrationWarning>
+            {digest?.asOf ? (
+              <>
+                <span className="max-xs:hidden">as of </span>
+                {istTime(digest.asOf)} IST
+              </>
+            ) : null}
           </span>
           <IconButton label="Refresh digest" onClick={onRefresh} disabled={refreshing}>
             <RefreshCw className={cn("size-[18px]", refreshing && "animate-spin")} />

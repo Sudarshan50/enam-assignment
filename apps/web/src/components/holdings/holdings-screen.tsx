@@ -39,30 +39,28 @@ function HoldingRow({ h, index }: { h: Holding; index: number }) {
   const spike = (h.volumeVsAvg ?? 0) >= 1.5;
   return (
     <motion.li layout="position" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(index, 12) * 0.025, duration: 0.35 }}>
-      <Link href={`/ask/${h.symbol}`} className="group flex min-h-[68px] items-center gap-3 py-3 sm:gap-5">
+      <Link href={`/ask/${h.symbol}`} className="group flex min-h-[68px] items-center gap-2.5 py-3 xs:gap-3 sm:gap-5">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-[14px] font-semibold tracking-[0.02em] text-ink">{h.symbol}</span>
-            {h.researchReady ? <span title="Research ready" aria-label="research ready" className="size-1.5 rounded-full bg-pos" /> : null}
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate font-mono text-[14px] font-semibold tracking-[0.02em] text-ink">{h.symbol}</span>
+            {h.researchReady ? <span title="Research ready" aria-label="research ready" className="size-1.5 shrink-0 rounded-full bg-pos" /> : null}
             {h.unreadCount > 0 ? (
-              <span aria-label={`${h.unreadCount} unread filings`} className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-act-soft px-1 font-mono text-[10px] text-act">
+              <span aria-label={`${h.unreadCount} unread filings`} className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-act-soft px-1 font-mono text-[10px] text-act">
                 {h.unreadCount}
               </span>
             ) : null}
           </div>
-          <p className="mt-0.5 flex min-w-0 gap-1.5 text-[12.5px] text-ink-faint">
-            <span className="truncate">{h.name}</span>
-            <span className={cn("shrink-0 font-mono text-[11.5px] sm:hidden", spike ? "text-amber" : "text-ink-faint")}>· {formatMultiple(h.volumeVsAvg)}</span>
-          </p>
+          <p className="mt-0.5 line-clamp-2 text-[12.5px] leading-snug text-ink-faint">{h.name}</p>
         </div>
-        <Sparkline values={h.sparkline} width={72} height={28} label={`${h.symbol}: 30-session price trend`} />
+        <Sparkline values={h.sparkline} width={72} height={28} label={`${h.symbol}: 30-session price trend`} className="w-14 shrink-0 xs:w-[72px]" />
         <div className="hidden w-[84px] text-right sm:block">
           <p className={cn("font-mono text-[13px] tnum", spike ? "text-amber" : "text-ink-muted")}>{formatMultiple(h.volumeVsAvg)}</p>
           <p className="font-mono text-[10.5px] text-ink-faint">{formatCount(h.volume, true)}</p>
         </div>
-        <div className="w-[96px] shrink-0 text-right">
-          <p className="font-mono text-[14px] text-ink tnum">{formatPrice(h.close)}</p>
+        <div className="w-[88px] shrink-0 text-right xs:w-[96px]">
+          <p className="font-mono text-[13.5px] text-ink tnum xs:text-[14px]">{formatPrice(h.close)}</p>
           <Delta value={h.changePct} className="text-[12.5px]" digits={2} />
+          <p className={cn("font-mono text-[11px] tnum sm:hidden", spike ? "text-amber" : "text-ink-faint")}>{formatMultiple(h.volumeVsAvg)} vol</p>
         </div>
       </Link>
     </motion.li>
@@ -85,7 +83,7 @@ export function HoldingsScreen() {
       </PageTitle>
 
       {data ? (
-        <dl className="mt-7 grid grid-cols-4 gap-px overflow-hidden rounded-2xl border border-rule bg-rule">
+        <dl className="mt-7 grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-rule bg-rule xs:grid-cols-4">
           {[
             ["Up", up, "text-pos"],
             ["Down", down, "text-neg"],
@@ -114,7 +112,7 @@ export function HoldingsScreen() {
       </ul>
       <p className="mt-6 flex items-center gap-2 font-mono text-[10.5px] text-ink-faint">
         <span className="size-1.5 rounded-full bg-pos" aria-hidden /> research ready ·{" "}
-        <span className="inline-flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-act-soft px-1 text-[9px] text-act">2</span> unread filings
+        <span className="inline-flex h-[14px] min-w-[14px] items-center justify-center rounded-full bg-act-soft px-1 text-[10px] text-act">2</span> unread filings
       </p>
     </PageColumns>
   );

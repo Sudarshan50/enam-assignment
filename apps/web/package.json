@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "check-mocks": "tsx scripts/check-mocks.ts",
     "test": "vitest run --config vitest.config.ts",
-    "e2e": "node --env-file-if-exists=../../.env e2e/run.mjs"
+    "e2e": "node --env-file-if-exists=../../.env e2e/run.mjs",
+    "e2e:mobile": "node e2e/mobile.mjs"
   },
   "dependencies": {
     "@finn/shared": "*",
