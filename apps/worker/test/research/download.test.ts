@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { assertSafeUrl, createDocumentDownloader, downloadPdf, UnsafeUrlError } from "../../src/pipelines/documents";
+import { downloadCandidates } from "../../src/pipelines/documents/download";
 import { fakeHttp, fakePdf } from "./helpers";
 
 describe("download safety", () => {
@@ -43,6 +44,23 @@ describe("downloadPdf", () => {
   it("refuses non-PDF payloads such as an HTML error page", async () => {
     const http = fakeHttp(new Map([["https://www.bseindia.com/a.pdf", new TextEncoder().encode("<html>Access denied</html>")]]));
     await expect(downloadPdf(http, "https://www.bseindia.com/a.pdf")).rejects.toThrow(/Not a PDF/);
+  });
+
+  it("falls back to BSE's archive paths when the AnnPdfOpen redirect cannot be fetched", async () => {
+    const name = "1a3bc0e3-c7ff-4887-a18a-f73fd400e8ca.pdf";
+    const open = `https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname=${name}`;
+    const his = `https://www.bseindia.com/xml-data/corpfiling/AttachHis/${name}`;
+    const http = fakeHttp(new Map([[his, fakePdf(["call"])]]));
+    const r = await downloadPdf(http, open);
+    expect(r.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(http.requested).toEqual([open, `https://www.bseindia.com/xml-data/corpfiling/AttachLive/${name}`, his]);
+  });
+
+  it("reports the original error when every candidate fails, and never invents paths for other URLs", async () => {
+    const open = "https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname=x.pdf";
+    await expect(downloadPdf(fakeHttp(new Map()), open)).rejects.toThrow(`HTTP 404 for ${open}`);
+    expect(downloadCandidates("https://www.bseindia.com/stockinfo/AnnPdfOpen.aspx?Pname=../../etc.pdf")).toHaveLength(1);
+    expect(downloadCandidates("https://nsearchives.nseindia.com/corporate/a.pdf")).toEqual(["https://nsearchives.nseindia.com/corporate/a.pdf"]);
   });
 
   it("checks the URL before any request", async () => {

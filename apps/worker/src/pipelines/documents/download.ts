@@ -48,11 +48,31 @@ export function createDocumentDownloader(urls: string[]): HttpClient {
   return createHttpClient({ allowedHostSuffixes: [...suffixes], timeoutMs: DOWNLOAD_TIMEOUT_MS, maxBytes: MAX_PDF_BYTES, retries: 2 });
 }
 
+/**
+ * BSE's AnnPdfOpen.aspx answers some requests with a redirect whose headers Node's strict HTTP parser
+ * rejects ("fetch failed"). The file itself lives at a predictable archive path, so those are tried next.
+ */
+export function downloadCandidates(url: string): string[] {
+  const parsed = new URL(url);
+  if (!parsed.hostname.endsWith("bseindia.com") || !/\/annpdfopen\.aspx$/i.test(parsed.pathname)) return [url];
+  const name = parsed.searchParams.get("Pname");
+  if (!name || !/^[\w.-]+\.pdf$/i.test(name)) return [url];
+  return [url, ...["AttachLive", "AttachHis"].map((dir) => `https://www.bseindia.com/xml-data/corpfiling/${dir}/${name}`)];
+}
+
 export async function downloadPdf(http: HttpClient, url: string): Promise<{ bytes: Uint8Array; sha256: string }> {
   const parsed = assertSafeUrl(url);
   const referer = parsed.hostname.endsWith("bseindia.com") ? { Referer: "https://www.bseindia.com/" } : undefined;
-  const bytes = await http.getBuffer(url, referer);
-  const head = new TextDecoder().decode(bytes.slice(0, 5));
-  if (head !== "%PDF-") throw new Error(`Not a PDF (starts with ${JSON.stringify(head)})`);
-  return { bytes, sha256: createHash("sha256").update(bytes).digest("hex") };
+  let firstError: unknown;
+  for (const candidate of downloadCandidates(url)) {
+    try {
+      const bytes = await http.getBuffer(candidate, referer);
+      const head = new TextDecoder().decode(bytes.slice(0, 5));
+      if (head !== "%PDF-") throw new Error(`Not a PDF (starts with ${JSON.stringify(head)})`);
+      return { bytes, sha256: createHash("sha256").update(bytes).digest("hex") };
+    } catch (err) {
+      firstError ??= err;
+    }
+  }
+  throw firstError;
 }
