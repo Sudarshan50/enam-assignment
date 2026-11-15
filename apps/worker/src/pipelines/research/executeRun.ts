@@ -1,13 +1,11 @@
-import { tablesFromRows } from "@finn/ai/financials/history";
 import { createDefaultModuleRegistry, type ModuleRegistry } from "@finn/ai/modules/registry";
-import type { ModuleDocument } from "@finn/ai/modules/types";
 import { mapWithConcurrency } from "@finn/ai/util/concurrency";
 import { documentLabel, documentsRepo } from "@finn/db/repositories/documents";
-import { historyRepo } from "@finn/db/repositories/history";
 import { researchRepo, type ResearchRepo, type ResearchRunRow } from "@finn/db/repositories/research";
 import { MODULE_KEYS, ModuleKeySchema, type ModuleKey } from "@finn/shared/contracts/research";
 import type { WorkerContext } from "../../context";
 import { createDocumentDownloader, discoverDocuments, processDocument } from "../documents";
+import { loadModuleInputs } from "./moduleInputs";
 import { runModules, type ModuleOutcome } from "./runModules";
 
 const HEARTBEAT_MS = 30_000;
@@ -28,10 +26,6 @@ export interface RunSummary {
   status: "completed" | "partial" | "failed" | "superseded";
   documents: { label: string; status: string; pages: number; chunks: number; error?: string }[];
   modules: ModuleOutcome[];
-}
-
-function iso(d: Date | null): string | null {
-  return d ? d.toISOString().slice(0, 10) : null;
 }
 
 class LeaseLostError extends Error {
@@ -127,18 +121,7 @@ export async function executeResearchRun(ctx: WorkerContext, run: ResearchRunRow
     summary.documents = results;
 
     await setStatus("synthesizing");
-    const ready = await docsRepo.listReady(symbol, ["annual_report", "transcript"]);
-    const documents: ModuleDocument[] = ready.map((d) => ({
-      id: d.id,
-      docType: d.doc_type,
-      label: documentLabel(d),
-      periodLabel: d.period_label,
-      periodEnd: iso(d.period_end),
-      url: d.url,
-      sha256: d.sha256,
-      pages: d.pages,
-    }));
-    const history = tablesFromRows(await historyRepo(ctx.sql).listForSymbol(symbol));
+    const { documents, history } = await loadModuleInputs(ctx, symbol);
     summary.modules = await runModules({
       runId: run.id,
       keys,

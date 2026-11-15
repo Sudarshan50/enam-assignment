@@ -2,9 +2,10 @@ import { hostname } from "node:os";
 import { sleep } from "@finn/ai/util/concurrency";
 import { researchRepo, type ResearchRunRow } from "@finn/db/repositories/research";
 import { MODULE_KEYS, ModuleKeySchema, type ModuleKey } from "@finn/shared/contracts/research";
-import { argFlag, argString, requireString, UsageError } from "../../args";
+import { argFlag, argInt, argString, requireString, UsageError } from "../../args";
 import type { Command, CommandArgs, WorkerContext } from "../../context";
 import { executeResearchRun, type RunSummary } from "./executeRun";
+import { retryDueModules } from "./retryModules";
 
 const IDLE_POLL_MS = 10_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -92,6 +93,16 @@ export const researchWorkerCommand: Command = {
   },
 };
 
-export const researchCommands: Command[] = [researchCommand, researchWorkerCommand];
+export const moduleRetriesCommand: Command = {
+  name: "module-retries",
+  description: "Re-run research modules that failed or came back incomplete and are due a retry (--limit N, default 3; --symbol X)",
+  async run(ctx, args) {
+    const symbol = argString(args, "symbol")?.toUpperCase();
+    const outcomes = await retryDueModules(ctx, { limit: argInt(args, "limit", 3), ...(symbol ? { symbols: [symbol] } : {}) });
+    ctx.log.info({ retried: outcomes.map((o) => `${o.symbol}/${o.module}: ${o.result} (attempt ${o.attempts})`) }, "module retries finished");
+  },
+};
+
+export const researchCommands: Command[] = [researchCommand, researchWorkerCommand, moduleRetriesCommand];
 
 export { executeResearchRun, type RunSummary } from "./executeRun";

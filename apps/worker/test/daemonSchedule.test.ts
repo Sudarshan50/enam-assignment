@@ -11,9 +11,16 @@ describe("daemon schedule", () => {
   });
 
   it("runs everything that is due on first start", () => {
-    expect(names(ist("2026-11-13T18:45:00"))).toEqual(["ingest", "eod"]);
-    expect(names(ist("2026-11-13T21:15:00"))).toEqual(["ingest", "eod", "results-backfill"]);
-    expect(names(ist("2026-11-15T06:30:00"))).toEqual(["ingest", "master-list"]);
+    expect(names(ist("2026-11-13T18:45:00"))).toEqual(["ingest", "eod", "module-retries"]);
+    expect(names(ist("2026-11-13T21:15:00"))).toEqual(["ingest", "eod", "results-backfill", "module-retries"]);
+    expect(names(ist("2026-11-15T06:30:00"))).toEqual(["ingest", "master-list", "module-retries"]);
+  });
+
+  it("picks up due module retries every 5 minutes, day and night", () => {
+    for (const at of [ist("2026-11-13T11:00:00"), ist("2026-11-15T03:00:00")]) {
+      expect(names(at, new Map([["module-retries", at.getTime() - 4 * 60_000]]))).not.toContain("module-retries");
+      expect(names(at, new Map([["module-retries", at.getTime() - 5 * 60_000]]))).toContain("module-retries");
+    }
   });
 
   it("polls announcements every 10 minutes in the day and hourly overnight", () => {

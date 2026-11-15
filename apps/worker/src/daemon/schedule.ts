@@ -57,6 +57,13 @@ export const DEFAULT_JOBS: readonly ScheduledJob[] = [
       return weekday === 0 && minutes >= 6 * 60 && minutes < 7 * 60 ? 7 * 24 * 60 * MINUTE : null;
     },
   },
+  {
+    name: "module-retries",
+    command: "module-retries",
+    args: {},
+    // Each retry carries its own backoff; this only bounds how soon a due one is picked up.
+    intervalMs: () => 5 * MINUTE,
+  },
 ];
 
 /** Jobs whose interval has elapsed since their last start, in declaration order. */
