@@ -13,6 +13,7 @@ const S = {
   DEAD: testSymbol("ZTARTDEAD"),
   PART: testSymbol("ZTARTPART"),
   DROP: testSymbol("ZTARTDROP"),
+  ALL: testSymbol("ZTARTALL"),
 };
 const SYMBOLS = Object.values(S);
 const { sql, reachable } = await connect(4);
@@ -151,6 +152,8 @@ describe.skipIf(!reachable)("module retries", () => {
       expect((await repo.getModuleRetry(S.PART, "promise_ledger"))?.next_attempt_at.getTime()).toBe(T0.getTime() + 6 * MIN + MODULE_RETRY_BACKOFF_MS[1]!);
       const [cached] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM module_cache WHERE symbol = ${S.PART}`;
       expect(cached!.n).toBe(0);
+      // Nothing in the run is failed any more; the ledger shows its gap and keeps retrying.
+      expect(await repo.get(runId)).toMatchObject({ status: "completed", error: null });
 
       reply = async () => {
         throw new BudgetExceededError(500, 500);
@@ -159,6 +162,24 @@ describe.skipIf(!reachable)("module retries", () => {
       expect(b).toMatchObject({ result: "retrying", attempts: 1 });
       // T0 is 11:30 IST on 15 Nov; the budget resets at midnight IST, and the retry goes 5 minutes after it.
       expect((await repo.getModuleRetry(S.PART, "promise_ledger"))?.next_attempt_at.toISOString()).toBe("2026-11-15T18:35:00.000Z");
+    });
+
+    it("brings a run where every module failed back to partial, then completed, as its retries succeed", async () => {
+      const { run } = await repo.createOrGetActive(S.ALL, ["promise_ledger", "bull_bear"], null);
+      for (const m of ["promise_ledger", "bull_bear"]) {
+        await repo.upsertModule(run.id, m, "failed", { error: "LlmTransportError: LLM HTTP 503" });
+        await repo.scheduleModuleRetry({ symbol: S.ALL, module: m, runId: run.id, reason: "LLM HTTP 503" }, T0);
+      }
+      await repo.setStatus(run.id, "failed", { error: "2 module(s) failed" });
+      const reg = new ModuleRegistry();
+      for (const key of ["promise_ledger", "bull_bear"] as ModuleKey[]) {
+        reg.register({ key, version: "zta-retry-1", inputs: { documents: true, history: false }, run: async () => ({ status: "done", payload: { key } }) });
+      }
+
+      expect(await retryDueModules(fakeContext(sql), { registry: reg, symbols: [S.ALL], limit: 1, now: at(6 * MIN) })).toHaveLength(1);
+      expect(await repo.get(run.id)).toMatchObject({ status: "partial", error: "1 module(s) failed" });
+      expect(await retryDueModules(fakeContext(sql), { registry: reg, symbols: [S.ALL], limit: 1, now: at(6 * MIN) })).toHaveLength(1);
+      expect(await repo.get(run.id)).toMatchObject({ status: "completed", error: null });
     });
 
     it("drops a retry for a module that no longer exists", async () => {

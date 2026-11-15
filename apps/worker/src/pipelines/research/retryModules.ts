@@ -55,6 +55,15 @@ export async function retryDueModules(
     return { ...outcome, result: "retrying" };
   }
 
+  /** Re-derives a finished run's status from its modules, by the same rule executeRun uses. */
+  async function settleRunStatus(run: { id: string; status: string }): Promise<void> {
+    if (run.status !== "partial" && run.status !== "failed") return;
+    const modules = await repo.listModules(run.id);
+    const failed = modules.filter((m) => m.status === "failed").length;
+    const status = failed === 0 ? "completed" : failed === modules.length ? "failed" : "partial";
+    if (status !== run.status) await repo.setStatus(run.id, status, { error: failed ? `${failed} module(s) failed` : null });
+  }
+
   async function retryOne(row: ModuleRetryRow): Promise<RetryOutcome> {
     const key = ModuleKeySchema.safeParse(row.module);
     const runner = key.success ? registry.get(key.data) : undefined;
@@ -95,6 +104,7 @@ export async function retryDueModules(
       await repo.upsertModule(run.id, key.data, "insufficient_sources", { cacheKey, error: result.reason });
     }
     await repo.addEvent(run.id, "module.completed", `${runner.key} rebuilt on retry attempt ${attempt}`, { key: key.data, status: result.status, retry: attempt });
+    await settleRunStatus(run);
     if (result.status === "done" && result.incomplete) return shortfall(row, result.incomplete, false);
 
     await repo.putModuleCache({
@@ -105,9 +115,6 @@ export async function retryDueModules(
       payload: result.status === "done" ? result.payload : { reason: result.reason },
     });
     await repo.resolveModuleRetry(row.symbol, row.module);
-    if (run.status === "partial" && !(await repo.listModules(run.id)).some((m) => m.status === "failed")) {
-      await repo.setStatus(run.id, "completed", { error: null });
-    }
     ctx.log.info({ symbol: row.symbol, module: row.module, runId: run.id, attempt }, "module retry succeeded");
     return { symbol: row.symbol, module: row.module, runId: run.id, result: "resolved", attempts: attempt };
   }
