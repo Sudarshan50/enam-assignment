@@ -59,13 +59,15 @@ export async function runModules(opts: {
       }
       if (!result) {
         result = await runner.run(ctx);
-        await repo.putModuleCache({
-          cacheKey,
-          symbol: ctx.symbol,
-          module: key,
-          status: result.status,
-          payload: result.status === "done" ? result.payload : { reason: result.reason },
-        });
+        if (!(result.status === "done" && result.cacheable === false)) {
+          await repo.putModuleCache({
+            cacheKey,
+            symbol: ctx.symbol,
+            module: key,
+            status: result.status,
+            payload: result.status === "done" ? result.payload : { reason: result.reason },
+          });
+        }
       }
 
       if (result.status === "done") {

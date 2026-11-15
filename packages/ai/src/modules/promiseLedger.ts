@@ -6,6 +6,7 @@ import type { z } from "zod";
 import { normaliseForMatch, type SourceChunk } from "../citations/validator";
 import { createHistoryActuals } from "../ledger/actuals";
 import { extractGuidance } from "../ledger/extract";
+import { LlmValidationError } from "../llm/errors";
 import { matchGuidance, summariseLedger, type LedgerItem } from "../ledger/match";
 import { EXTRACTOR_VERSION } from "../prompts/guidance";
 import { mapWithConcurrency } from "../util/concurrency";
@@ -56,6 +57,7 @@ export const promiseLedgerModule: ResearchModuleRunner = {
     const docs = documentsRepo(ctx.sql);
     const guidance = guidanceRepo(ctx.sql);
     const chunkById = new Map<string, { index: number; text: string }>();
+    const unread: { id: string; label: string; error: LlmValidationError }[] = [];
 
     await mapWithConcurrency(transcripts, 4, async (t) => {
       const [rows, pages] = await Promise.all([chunks.listForDocument(t.id), docs.pages(t.id)]);
@@ -70,20 +72,32 @@ export const promiseLedgerModule: ResearchModuleRunner = {
         text: c.text,
         pages: pages.filter((p) => p.page >= c.page_start && p.page <= c.page_end),
       }));
-      const { items, stats } = await extractGuidance(
-        { llm: ctx.llm },
-        { documentId: t.id, symbol: ctx.symbol, companyName: ctx.companyName, label: t.label, callDate: t.periodEnd, chunks: sourceChunks },
-      );
-      await guidance.replaceForDocument(t.id, items);
-      ctx.log?.("guidance extracted", { document: t.label, proposed: stats.proposed, kept: stats.kept, rejected: stats.rejected.length });
+      try {
+        const { items, stats } = await extractGuidance(
+          { llm: ctx.llm },
+          { documentId: t.id, symbol: ctx.symbol, companyName: ctx.companyName, label: t.label, callDate: t.periodEnd, chunks: sourceChunks },
+        );
+        await guidance.replaceForDocument(t.id, items);
+        ctx.log?.("guidance extracted", { document: t.label, proposed: stats.proposed, kept: stats.kept, rejected: stats.rejected.length });
+      } catch (err) {
+        // One unusable reply loses that call, not the ledger; its earlier extraction (if any) stays in place.
+        if (!(err instanceof LlmValidationError)) throw err;
+        unread.push({ id: t.id, label: t.label, error: err });
+        ctx.log?.("guidance extraction failed", { document: t.label, error: err.message });
+      }
     });
+    if (unread.length === transcripts.length) throw unread[0]!.error;
 
     const transcriptIds = new Set(transcripts.map((t) => t.id));
     const rows = (await guidance.listBySymbol(ctx.symbol)).filter((r) => transcriptIds.has(r.document_id));
     const rowById = new Map(rows.map((r) => [r.id, r] as const));
+    const withItems = new Set(rows.map((r) => r.document_id));
+    const missing = new Set(unread.filter((u) => !withItems.has(u.id)).map((u) => u.id));
+    // A call that was never read is left out, so its silence does not count as dropping earlier guidance.
+    const read = transcripts.filter((t) => !missing.has(t.id));
     const entries = matchGuidance({
       items: rows.map((r) => toLedgerItem(r, chunkById)),
-      transcripts: transcripts.map((t) => ({ documentId: t.id, label: t.label, callDate: t.periodEnd })),
+      transcripts: read.map((t) => ({ documentId: t.id, label: t.label, callDate: t.periodEnd })),
       actuals: createHistoryActuals(ctx.history),
       asOf: ctx.asOf,
     });
@@ -138,8 +152,10 @@ export const promiseLedgerModule: ResearchModuleRunner = {
     const payload: Payload = {
       summary: { elapsed: s.elapsed, delivered: s.delivered, missed: s.missed, pending: s.pending, quietlyDropped: s.quietlyDropped },
       promises,
-      transcriptsUsed: transcripts.map((t) => t.label),
+      transcriptsUsed: read.map((t) => t.label),
+      ...(missing.size > 0 ? { transcriptsUnread: transcripts.filter((t) => missing.has(t.id)).map((t) => t.label) } : {}),
     };
-    return { status: "done", payload: PromiseLedgerPayloadSchema.parse(payload) };
+    // A ledger missing a call is not cached, so the next run tries that call again.
+    return { status: "done", payload: PromiseLedgerPayloadSchema.parse(payload), ...(unread.length > 0 ? { cacheable: false as const } : {}) };
   },
 };

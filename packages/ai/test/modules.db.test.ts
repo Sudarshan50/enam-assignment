@@ -3,6 +3,8 @@ import { BullBearPayloadSchema, BusinessSnapshotPayloadSchema, PromiseLedgerPayl
 import type { StructuredCompletionRequest } from "@finn/shared/ports";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { HistoryTables } from "../src/financials/history";
+import { LlmTransportError, LlmValidationError } from "../src/llm/errors";
+import { EXTRACTOR_VERSION } from "../src/prompts/guidance";
 import { bullBearModule } from "../src/modules/bullBear";
 import { businessSnapshotModule } from "../src/modules/businessSnapshot";
 import { promiseLedgerModule } from "../src/modules/promiseLedger";
@@ -270,8 +272,42 @@ describe.skipIf(!reachable)("research modules against the local database (synthe
     it("drops stale items when a later extraction no longer finds them", async () => {
       const llm = fakeLlm({ guidance_extract: (req) => (req.ref?.id === docs.t2!.id ? { items: [] } : byDoc(req)) });
       await promiseLedgerModule.run(ctx(llm));
-      const rows = await guidanceRepo(sql).listForDocument(docs.t2!.id, 2);
-      expect(rows).toEqual([]);
+      expect(await guidanceRepo(sql).listForDocument(docs.t1!.id, EXTRACTOR_VERSION)).not.toEqual([]);
+      expect(await guidanceRepo(sql).listForDocument(docs.t2!.id, EXTRACTOR_VERSION)).toEqual([]);
+    });
+
+    const unreadable = (id: string) => (req: StructuredCompletionRequest<unknown>) => {
+      if (req.ref?.id === id) throw new LlmValidationError("guidance_extract: response cut off at the 6000 token limit before the JSON was complete", "guidance_extract");
+      return byDoc(req);
+    };
+
+    it("an unreadable call keeps its earlier guidance, and the ledger built without it is not cached", async () => {
+      await promiseLedgerModule.run(ctx(fakeLlm({ guidance_extract: byDoc })));
+      const logs: string[] = [];
+      const r = await promiseLedgerModule.run(ctx(fakeLlm({ guidance_extract: unreadable(docs.t2!.id) }), { log: (m) => logs.push(m) }));
+      expect(r).toMatchObject({ status: "done", cacheable: false });
+      const p = PromiseLedgerPayloadSchema.parse(r.payload);
+      expect(p.transcriptsUsed).toEqual(["Q2 FY27 concall", "Q1 FY27 concall", "Q4 FY26 concall"]);
+      expect(p.transcriptsUnread).toBeUndefined();
+      expect(p.promises.find((x) => x.metric === "ebitda_margin")).toMatchObject({ verdict: "missed", saidIn: "Q1 FY27 concall" });
+      expect(logs.filter((m) => m === "guidance extraction failed")).toHaveLength(1);
+    });
+
+    it("names a call that has never been read, builds the ledger from the rest and does not read its silence as dropped guidance", async () => {
+      await guidanceRepo(sql).replaceForDocument(docs.t3!.id, []);
+      const r = await promiseLedgerModule.run(ctx(fakeLlm({ guidance_extract: unreadable(docs.t3!.id) })));
+      const p = PromiseLedgerPayloadSchema.parse(r.payload);
+      expect(p.transcriptsUsed).toEqual(["Q1 FY27 concall", "Q4 FY26 concall"]);
+      expect(p.transcriptsUnread).toEqual(["Q2 FY27 concall"]);
+      expect(p.summary).toEqual({ elapsed: 2, delivered: 1, missed: 1, pending: 2, quietlyDropped: 0 });
+    });
+
+    it("still fails when every call is unreadable or the provider itself fails", async () => {
+      const allBad = fakeLlm({ guidance_extract: () => { throw new LlmValidationError("guidance_extract: invalid JSON", "guidance_extract"); } });
+      await expect(promiseLedgerModule.run(ctx(allBad))).rejects.toBeInstanceOf(LlmValidationError);
+      const down = fakeLlm({ guidance_extract: (req) => { if (req.ref?.id === docs.t2!.id) throw new LlmTransportError("LLM HTTP 503", 503); return byDoc(req); } });
+      await expect(promiseLedgerModule.run(ctx(down))).rejects.toBeInstanceOf(LlmTransportError);
+      expect(await promiseLedgerModule.run(ctx(fakeLlm({ guidance_extract: byDoc })))).not.toHaveProperty("cacheable");
     });
 
     it("is insufficient without dated transcripts", async () => {

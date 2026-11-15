@@ -29,8 +29,8 @@ const promise = (id: string, verdict: PromiseItem["verdict"], extra: Partial<Pro
 
 type Summary = { elapsed: number; delivered: number; missed: number; pending: number; quietlyDropped: number };
 
-function render(summary: Summary, promises: PromiseItem[]): string {
-  const ledger = { summary, promises, transcriptsUsed: ["Q1 FY27 concall", "Q2 FY27 concall"] };
+function render(summary: Summary, promises: PromiseItem[], transcriptsUnread?: string[]): string {
+  const ledger = { summary, promises, transcriptsUsed: ["Q1 FY27 concall", "Q2 FY27 concall"], transcriptsUnread };
   return renderToStaticMarkup(createElement(CitationProvider, null, createElement(PromiseLedger, { ledger })));
 }
 
@@ -68,5 +68,20 @@ describe("promise rows", () => {
     expect(html).toContain("FY27 · Aspiration");
     expect(html).toContain("Q2 FY27 earnings call");
     expect(html).not.toContain("transcript Q2 FY27</span>");
+  });
+});
+
+describe("calls that could not be read", () => {
+  const none = { elapsed: 0, delivered: 0, missed: 0, pending: 0, quietlyDropped: 0 };
+
+  it("names them beside the ledger and the empty state", () => {
+    const withPromises = render({ ...none, pending: 1 }, [promise("a", "pending")], ["Q4 FY26 concall"]);
+    expect(withPromises).toContain("Couldn&#x27;t read the Q4 FY26 earnings call, so its guidance isn&#x27;t counted here.");
+    const empty = render(none, [], ["Q4 FY26 concall", "Q3 FY26 concall"]);
+    expect(empty).toContain("Q4 FY26 earnings call, Q3 FY26 earnings call, so their guidance");
+  });
+
+  it("says nothing when every call was read", () => {
+    expect(render({ ...none, pending: 1 }, [promise("a", "pending")])).not.toContain("Couldn");
   });
 });

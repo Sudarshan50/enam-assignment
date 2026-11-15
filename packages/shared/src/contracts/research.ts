@@ -65,6 +65,8 @@ export const PromiseLedgerPayloadSchema = z.object({
   summary: z.object({ elapsed: z.number(), delivered: z.number(), missed: z.number(), pending: z.number(), quietlyDropped: z.number() }),
   promises: z.array(PromiseSchema),
   transcriptsUsed: z.array(z.string()),
+  /** Calls whose guidance could not be read this run; absent when every call was read. */
+  transcriptsUnread: z.array(z.string()).optional(),
 });
 
 export const FinancialSeriesPointSchema = z.object({ period: z.string(), value: z.number().nullable() });

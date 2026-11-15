@@ -31,7 +31,7 @@ export interface ModuleContext {
 }
 
 export type ResearchModulePayload =
-  | { status: "done"; payload: unknown }
+  | { status: "done"; payload: unknown; /** False when the payload is incomplete and should be recomputed next run. */ cacheable?: false }
   | { status: "insufficient_sources"; payload: null; reason: string };
 
 /** One research module. New modules implement this and are added to the registry; nothing else changes. */

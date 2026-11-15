@@ -162,6 +162,15 @@ export function PromiseLedger({ ledger }: { ledger: Ledger }) {
       .filter((f) => f.n > 0),
   ];
 
+  const unread = ledger.transcriptsUnread ?? [];
+  const unreadNote =
+    unread.length > 0 ? (
+      <p className="mt-3 text-[13px] leading-relaxed text-amber">
+        Couldn&apos;t read the {unread.map(callLabel).join(", ")}, so {unread.length === 1 ? "its" : "their"} guidance isn&apos;t counted here. It is retried on
+        the next refresh.
+      </p>
+    ) : null;
+
   if (promises.length === 0) {
     return (
       <div>
@@ -175,6 +184,7 @@ export function PromiseLedger({ ledger }: { ledger: Ledger }) {
             Read: {ledger.transcriptsUsed[0]} – {ledger.transcriptsUsed.at(-1)}
           </p>
         ) : null}
+        {unreadNote}
       </div>
     );
   }
@@ -248,6 +258,7 @@ export function PromiseLedger({ ledger }: { ledger: Ledger }) {
         From {ledger.transcriptsUsed.length} calls ({ledger.transcriptsUsed[0]} – {ledger.transcriptsUsed.at(-1)}), matched to same-period filed actuals. A
         count with its denominator — never a score.
       </p>
+      {unreadNote}
 
       <div className="scrollbar-none -mx-5 mt-6 flex gap-1.5 overflow-x-auto px-5" role="toolbar" aria-label="Filter promises">
         {filters.map((f) => (

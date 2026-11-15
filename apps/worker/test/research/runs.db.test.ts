@@ -298,6 +298,21 @@ describe.skipIf(!reachable)("research runs repository", () => {
       await park(runId);
     });
 
+    it("shows a result marked not cacheable but computes it again on the next run", async () => {
+      const incomplete = { promise_ledger: async () => ({ status: "done" as const, payload: { key: "promise_ledger", partial: true }, cacheable: false as const }) };
+      const keys: ModuleKey[] = ["promise_ledger", "financial_snapshot"];
+      for (const expected of [["financial_snapshot", "promise_ledger"], ["promise_ledger"]]) {
+        const runId = await newRun();
+        const { reg, calls } = registry(incomplete);
+        const out = await runModules({ runId, keys, registry: reg, ctx: ctx(runId), repo, model: "zta-model-incomplete", useCache: true });
+        expect(calls.sort()).toEqual(expected);
+        expect(out.find((o) => o.key === "promise_ledger")).toMatchObject({ status: "done", cached: false });
+        const rows = Object.fromEntries((await repo.listModules(runId)).map((r) => [r.module, r]));
+        expect(rows.promise_ledger).toMatchObject({ status: "done", payload: { key: "promise_ledger", partial: true } });
+        await park(runId);
+      }
+    });
+
     it("re-runs everything when the cache is bypassed or the model changes", async () => {
       for (const [model, useCache] of [
         ["zta-model", false],
