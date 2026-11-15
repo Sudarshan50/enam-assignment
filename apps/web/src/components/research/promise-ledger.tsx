@@ -158,6 +158,23 @@ export function PromiseLedger({ ledger }: { ledger: Ledger }) {
       .filter((f) => f.n > 0),
   ];
 
+  if (promises.length === 0) {
+    return (
+      <div>
+        <p className="font-display text-[26px] leading-[1.15] text-ink">No numeric guidance to track.</p>
+        <p className="mt-2 text-[14.5px] leading-relaxed text-ink-muted">
+          Management gave no quantified targets for revenue growth, margins, profit growth, capex, order book, volumes or net debt in the last{" "}
+          {ledger.transcriptsUsed.length} {ledger.transcriptsUsed.length === 1 ? "call" : "calls"}, so there is nothing to hold them to.
+        </p>
+        {ledger.transcriptsUsed.length > 0 ? (
+          <p className="mt-1.5 font-mono text-[10.5px] text-ink-faint">
+            Read: {ledger.transcriptsUsed[0]} – {ledger.transcriptsUsed.at(-1)}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div>
       {summary.elapsed > 0 ? (
