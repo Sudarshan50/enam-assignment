@@ -79,6 +79,19 @@ const METRIC_LABEL: Record<GuidanceMetric, string> = {
   net_debt: "net debt",
 };
 
+/** Units the actuals for each metric are expressed in; guidance in any other unit cannot be compared. */
+const SCORABLE_UNITS: Record<GuidanceMetric, readonly LedgerItem["unit"][]> = {
+  revenue_growth: ["pct"],
+  ebitda_margin: ["pct"],
+  pat_growth: ["pct"],
+  volume_growth: ["pct"],
+  capex: ["inr_crore"],
+  order_book: ["inr_crore"],
+  net_debt: ["inr_crore", "x"],
+};
+
+const UNIT_LABEL: Record<LedgerItem["unit"], string> = { pct: "percent", inr_crore: "₹ crore", x: "a multiple" };
+
 function fmt(v: number, unit: LedgerItem["unit"]): string {
   const n = Number.isInteger(v) ? String(v) : v.toFixed(1);
   return unit === "pct" ? `${n}%` : unit === "inr_crore" ? `₹${n} Cr` : `${n}x`;
@@ -203,6 +216,13 @@ export function matchGuidance(input: MatchInput): LedgerEntry[] {
       const a = input.actuals(rep.metric, period);
       if (rep.scope === "segment") {
         entries.push({ ...base, representative: rep, verdict: "not_scored", explanation: `Guided ${what} (${rep.saidIn}); cannot be scored: only company-wide actuals are available, not segment figures.${withdrawalNote}` });
+      } else if (!SCORABLE_UNITS[rep.metric].includes(rep.unit)) {
+        entries.push({
+          ...base,
+          representative: rep,
+          verdict: "not_scored",
+          explanation: `Guided ${what} (${rep.saidIn}); cannot be scored: stated in ${UNIT_LABEL[rep.unit]}, but ${METRIC_LABEL[rep.metric]} is measured in ${UNIT_LABEL[SCORABLE_UNITS[rep.metric][0]!]}.${withdrawalNote}`,
+        });
       } else if (a.status === "not_computable") {
         entries.push({ ...base, representative: rep, verdict: "not_scored", explanation: `Guided ${what} (${rep.saidIn}); cannot be scored: ${a.reason}.${withdrawalNote}` });
       } else if (a.status === "not_available") {

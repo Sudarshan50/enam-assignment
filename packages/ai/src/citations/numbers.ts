@@ -48,7 +48,7 @@ export function extractNumbers(text: string): ExtractedNumber[] {
 /** Numbers that do not need grounding: calendar years and tiny list markers. */
 export function isExemptNumber(n: ExtractedNumber): boolean {
   if (n.dimension !== "plain") return false;
-  return n.decimals === 0 && n.value >= 1990 && n.value <= 2100;
+  return n.decimals === 0 && n.value >= 1990 && n.value <= 2100 && !n.raw.includes(",");
 }
 
 function relClose(a: number, b: number, tolerance: number): boolean {
