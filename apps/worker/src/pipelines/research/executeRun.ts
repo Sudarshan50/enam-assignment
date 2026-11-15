@@ -72,9 +72,10 @@ export async function executeResearchRun(ctx: WorkerContext, run: ResearchRunRow
         onEmbedded: (_d, info) => repo.addEvent(run.id, "document.embedded", `Indexed ${label}`, { documentId: doc.id, label, chunks: info.chunks }),
         tick,
       });
-      if (r.status === "failed" || r.status === "scanned") {
-        const msg = r.status === "scanned" ? `${label} is a scanned PDF; skipped (no OCR)` : `Could not process ${label}`;
-        await repo.addEvent(run.id, "document.failed", msg, { documentId: doc.id, label, status: r.status, error: r.error?.slice(0, 300) ?? null });
+      const scanned = r.status === "scanned" || (r.status === "skipped" && doc.status === "scanned");
+      if (r.status === "failed" || scanned) {
+        const msg = scanned ? `${label} is a scanned PDF; skipped (no OCR)` : `Could not process ${label}`;
+        await repo.addEvent(run.id, "document.failed", msg, { documentId: doc.id, label, status: scanned ? "scanned" : r.status, error: r.error?.slice(0, 300) ?? null });
       } else if (r.status === "skipped") {
         await repo.addEvent(run.id, "document.embedded", `${label} already indexed`, { documentId: doc.id, label, chunks: r.chunks, cached: true });
       }
