@@ -16,7 +16,7 @@ import { toHolding, volumeVsAverage } from "../src/services/holdingsService";
 import { createPrefsService, sanitizeWeights, toPrefs } from "../src/services/prefsService";
 import { type PushRepository, type PushSender, createPushService } from "../src/services/pushService";
 import { parseLastEventId, streamResearchEvents } from "../src/services/researchEventStream";
-import { type PromiseRow, type ResearchRepository, type RunRecord, createResearchService, toModules, toPromiseLedger } from "../src/services/researchService";
+import { type ResearchRepository, type RunRecord, createResearchService, ledgerFromModules, toModules } from "../src/services/researchService";
 import { createSourceHealthService } from "../src/services/sourceHealthService";
 import { auth, buildTestApp, silentLog } from "./helpers";
 
@@ -36,7 +36,6 @@ function researchRepo(overrides: Partial<ResearchRepository> = {}): ResearchRepo
     findLatestRun: async () => null,
     listModules: async () => [],
     listDocuments: async () => [],
-    listPromises: async () => [],
     listStaleQueued: async () => [],
     ...overrides,
   };
@@ -95,8 +94,8 @@ describe("research read models", () => {
     ]);
   });
 
-  it("builds the promise ledger summary and defaults unscored verdicts", () => {
-    const base: PromiseRow = {
+  it("takes the promise ledger from the done promise_ledger module and nothing else", () => {
+    const promise = {
       id: "g1",
       metric: "revenue_growth",
       statementType: "explicit_guidance",
@@ -108,36 +107,21 @@ describe("research read models", () => {
       saidIn: "Q2 FY26 call",
       speaker: null,
       quote: "We expect 10-12% growth",
-      page: 4,
-      chunkId: null,
-      documentId: "d1",
-      documentLabel: "Transcript Q2 FY26",
-      documentUrl: null,
+      citation: { chunkId: "c1", documentId: "d1", documentLabel: "Transcript Q2 FY26", page: 4, quote: "We expect 10-12% growth", url: null },
       actual: null,
       actualPeriod: null,
       actualSource: null,
-      verdict: null,
-      explanation: null,
+      verdict: "pending",
+      explanation: "FY27 has not ended yet.",
     };
-    const ledger = toPromiseLedger([
-      base,
-      { ...base, id: "g2", statementType: "aspiration" },
-      { ...base, id: "g3", verdict: "delivered", explanation: "Grew 11%" },
-      { ...base, id: "g4", verdict: "missed" },
-      { ...base, id: "g5", verdict: "quietly_dropped" },
-      { ...base, id: "g6", metric: "not_a_metric" },
-    ]);
-    expect(ledger!.promises.map((p) => [p.id, p.verdict])).toEqual([
-      ["g1", "pending"],
-      ["g2", "not_scored"],
-      ["g3", "delivered"],
-      ["g4", "missed"],
-      ["g5", "quietly_dropped"],
-    ]);
-    expect(ledger!.summary).toEqual({ elapsed: 2, delivered: 1, missed: 1, pending: 1, quietlyDropped: 1 });
-    expect(ledger!.promises[0]!.citation).toMatchObject({ chunkId: "", documentId: "d1", page: 4 });
-    expect(ledger!.promises[0]!.explanation).toBe("Not checked against reported numbers yet.");
-    expect(toPromiseLedger([{ ...base, metric: "bogus" }])).toBeNull();
+    const summary = { elapsed: 0, delivered: 0, missed: 0, pending: 1, quietlyDropped: 0 };
+    const mod = (status: "done" | "running", payload: unknown) => ({ key: "promise_ledger" as const, status, payload, error: null, updatedAt: updatedAt.toISOString() });
+
+    expect(ledgerFromModules([mod("done", { summary, promises: [promise], transcriptsUsed: ["Q2 FY26"] })])).toEqual({ summary, promises: [promise] });
+    expect(ledgerFromModules([mod("running", { summary, promises: [promise], transcriptsUsed: [] })])).toBeNull();
+    expect(ledgerFromModules([mod("done", { summary, promises: [], transcriptsUsed: [] })])).toBeNull();
+    expect(ledgerFromModules([mod("done", { nonsense: true })])).toBeNull();
+    expect(ledgerFromModules([])).toBeNull();
   });
 
   it("reports an unknown stored run status as failed", async () => {

@@ -1,15 +1,13 @@
 import {
-  GuidanceMetricSchema,
   MODULE_KEYS,
   type ModuleKey,
   ModuleKeySchema,
   ModuleStatusSchema,
-  type PromiseItem,
+  PromiseLedgerPayloadSchema,
   type ResearchModule,
   type ResearchRun,
   type RunStatus,
   RunStatusSchema,
-  VerdictSchema,
 } from "@finn/shared";
 import type { WorkerDispatcher } from "../adapters/workerDispatcher";
 import type { CompanyResearch, CreateResearchRunResponse, PromiseLedger } from "../contracts";
@@ -44,30 +42,6 @@ export interface DocumentRow {
   url: string;
 }
 
-export interface PromiseRow {
-  id: string;
-  metric: string;
-  statementType: "explicit_guidance" | "target" | "aspiration";
-  low: number | null;
-  high: number | null;
-  unit: "pct" | "inr_crore" | "x";
-  horizonLabel: string;
-  horizonEnd: string | null;
-  saidIn: string;
-  speaker: string | null;
-  quote: string;
-  page: number | null;
-  chunkId: string | null;
-  documentId: string;
-  documentLabel: string;
-  documentUrl: string | null;
-  actual: number | null;
-  actualPeriod: string | null;
-  actualSource: string | null;
-  verdict: string | null;
-  explanation: string | null;
-}
-
 export interface ResearchRepository {
   findCompany(symbol: string): Promise<{ symbol: string; name: string } | null>;
   findLatestCompleted(symbol: string, since: Date): Promise<RunRecord | null>;
@@ -83,7 +57,6 @@ export interface ResearchRepository {
   findLatestRun(symbol: string): Promise<RunRecord | null>;
   listModules(runId: string): Promise<ModuleRow[]>;
   listDocuments(symbol: string): Promise<DocumentRow[]>;
-  listPromises(symbol: string): Promise<PromiseRow[]>;
   listStaleQueued(createdBefore: Date, limit: number): Promise<RunRecord[]>;
 }
 
@@ -131,47 +104,15 @@ export function toModules(run: Pick<RunRecord, "modules" | "updatedAt">, rows: M
   return MODULE_KEYS.flatMap((k) => byKey.get(k) ?? []);
 }
 
-export function toPromiseLedger(rows: PromiseRow[]): PromiseLedger | null {
-  const promises: PromiseItem[] = [];
-  for (const r of rows) {
-    const metric = GuidanceMetricSchema.safeParse(r.metric);
-    if (!metric.success) continue;
-    const verdict = VerdictSchema.safeParse(r.verdict);
-    promises.push({
-      id: r.id,
-      metric: metric.data,
-      statementType: r.statementType,
-      low: r.low,
-      high: r.high,
-      unit: r.unit,
-      horizonLabel: r.horizonLabel,
-      horizonEnd: r.horizonEnd,
-      saidIn: r.saidIn,
-      speaker: r.speaker,
-      quote: r.quote,
-      citation: {
-        chunkId: r.chunkId ?? "",
-        documentId: r.documentId,
-        documentLabel: r.documentLabel,
-        page: r.page,
-        quote: r.quote,
-        url: r.documentUrl,
-      },
-      actual: r.actual,
-      actualPeriod: r.actualPeriod,
-      actualSource: r.actualSource,
-      verdict: verdict.success ? verdict.data : r.statementType === "explicit_guidance" ? "pending" : "not_scored",
-      explanation: r.explanation ?? "Not checked against reported numbers yet.",
-    });
-  }
-  if (promises.length === 0) return null;
-  const count = (v: PromiseItem["verdict"]) => promises.filter((p) => p.verdict === v).length;
-  const delivered = count("delivered");
-  const missed = count("missed");
-  return {
-    summary: { elapsed: delivered + missed, delivered, missed, pending: count("pending"), quietlyDropped: count("quietly_dropped") },
-    promises,
-  };
+/**
+ * The ledger is the promise_ledger module's output: it de-duplicates restated promises and scopes to
+ * the transcripts the run used, so the top-level field and the module never disagree.
+ */
+export function ledgerFromModules(modules: ResearchModule[]): PromiseLedger | null {
+  const mod = modules.find((m) => m.key === "promise_ledger" && m.status === "done");
+  const parsed = PromiseLedgerPayloadSchema.safeParse(mod?.payload);
+  if (!parsed.success || parsed.data.promises.length === 0) return null;
+  return { summary: parsed.data.summary, promises: parsed.data.promises };
 }
 
 export function createResearchService(deps: {
@@ -253,14 +194,14 @@ export function createResearchService(deps: {
     async companyResearch(symbol) {
       const company = await repo.findCompany(symbol);
       if (!company) throw notFound(`Company ${symbol}`);
-      const [latest, promises] = await Promise.all([repo.findLatestRun(company.symbol), repo.listPromises(company.symbol)]);
+      const latest = await repo.findLatestRun(company.symbol);
       const run = latest ? await buildRun(latest, company.name) : null;
       return {
         symbol: company.symbol,
         companyName: company.name,
         run,
         modules: run?.modules ?? [],
-        promiseLedger: toPromiseLedger(promises),
+        promiseLedger: ledgerFromModules(run?.modules ?? []),
       };
     },
 

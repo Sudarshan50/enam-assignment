@@ -1,7 +1,7 @@
 import type { Sql } from "@finn/db";
 import type { RunStatus } from "@finn/shared";
 import type { ResearchEventRow, ResearchEventsSource } from "../services/researchEventStream";
-import type { DocumentRow, ModuleRow, PromiseRow, ResearchRepository, RunRecord } from "../services/researchService";
+import type { DocumentRow, ModuleRow, ResearchRepository, RunRecord } from "../services/researchService";
 import { json } from "./sql";
 
 const ACTIVE = ["queued", "processing_docs", "synthesizing"];
@@ -101,22 +101,6 @@ export function createResearchRepository(sql: Sql): ResearchRepository & Researc
         FROM documents WHERE symbol = ${symbol}
         ORDER BY period_end DESC NULLS LAST, created_at DESC
         LIMIT 50`;
-    },
-
-    async listPromises(symbol) {
-      return sql<PromiseRow[]>`
-        SELECT g.id, g.metric, g.statement_type AS "statementType", g.low::float8 AS low, g.high::float8 AS high, g.unit,
-               g.horizon_label AS "horizonLabel", g.horizon_end::text AS "horizonEnd", g.said_in AS "saidIn", g.speaker,
-               g.quote, g.page, g.chunk_id AS "chunkId", g.document_id AS "documentId",
-               initcap(replace(d.doc_type, '_', ' ')) || ' ' || d.period_label AS "documentLabel", d.url AS "documentUrl",
-               k.actual::float8 AS actual, k.actual_period AS "actualPeriod", k.actual_source AS "actualSource",
-               k.verdict, k.explanation
-        FROM guidance_items g
-        JOIN documents d ON d.id = g.document_id
-        LEFT JOIN guidance_checks k ON k.guidance_id = g.id
-        WHERE g.symbol = ${symbol}
-        ORDER BY g.said_on DESC NULLS LAST, g.created_at DESC
-        LIMIT 100`;
     },
 
     async listStaleQueued(createdBefore, limit) {

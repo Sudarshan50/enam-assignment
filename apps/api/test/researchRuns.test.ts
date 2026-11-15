@@ -55,7 +55,6 @@ function fakeRepo(seed: { runs?: RunRecord[]; createdToday?: number; insertConfl
     findLatestRun: async (symbol) => runs.filter((r) => r.symbol === symbol).at(-1) ?? null,
     listModules: async () => [{ module: "bull_bear", status: "done", payload: { bull: [], bear: [] }, error: null, updatedAt: NOW }],
     listDocuments: async () => [{ id: "d1", docType: "annual_report", periodLabel: "FY26", status: "ready", pages: 210, url: "https://x/ar.pdf" }],
-    listPromises: async () => [],
     listStaleQueued: async () => runs.filter((r) => r.status === "queued"),
   };
   return { repo, runs, events };
