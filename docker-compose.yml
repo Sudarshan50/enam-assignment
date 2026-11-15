@@ -1,0 +1,10 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: finn-pg
+    environment:
+      POSTGRES_USER: finn
+      POSTGRES_PASSWORD: finn
+      POSTGRES_DB: finn
+    ports:
+      - "54329:5432"

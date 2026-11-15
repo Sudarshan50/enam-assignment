@@ -1,0 +1,27 @@
+{
+  "name": "finn",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d db",
+    "db:migrate": "npm run migrate -w @finn/db",
+    "dev:api": "npm run dev -w @finn/api",
+    "dev:web": "npm run dev -w @finn/web",
+    "worker": "npm run cli -w @finn/worker --",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "^5.1.0"
+  }
+}
