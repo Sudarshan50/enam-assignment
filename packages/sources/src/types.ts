@@ -52,6 +52,22 @@ export interface BhavRow {
   trades: number;
 }
 
+/** The filings a results card needs, all on the same basis. Any slot can be missing. */
+export interface FilingSelection {
+  basis: "consolidated" | "standalone";
+  current: IntegratedFilingRef | null;
+  previousQuarter: IntegratedFilingRef | null;
+  yearAgoQuarter: IntegratedFilingRef | null;
+}
+
+/** Yahoo daily bar shaped like a BhavRow; fields Yahoo does not provide are null. */
+export interface YahooDailyRow extends Omit<BhavRow, "isin" | "turnover" | "trades"> {
+  isin: null;
+  turnover: null;
+  trades: null;
+  source: "yahoo";
+}
+
 export interface MasterListEntry {
   symbol: string;
   name: string;
@@ -61,7 +77,12 @@ export interface MasterListEntry {
   faceValue: number | null;
 }
 
-export type ScreenerDocKind = "annual_report" | "concall_transcript" | "concall_ppt" | "credit_rating";
+export type ScreenerDocKind =
+  | "annual_report"
+  | "concall_transcript"
+  | "concall_ppt"
+  | "concall_recording"
+  | "credit_rating";
 
 export interface ScreenerDocumentLink {
   kind: ScreenerDocKind;
