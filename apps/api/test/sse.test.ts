@@ -114,8 +114,13 @@ describe("GET /api/v1/research-runs/:id/events (SSE)", () => {
   it("ends open streams when the server shuts down", async () => {
     const source = fakeSource([event(1)], ["processing_docs"]);
     const controller = new AbortController();
+    const original = source.runStatus.bind(source);
+    source.runStatus = async (id) => {
+      // Shut down only once the first poll has written event 1, so slow machines cannot race the abort.
+      if (source.listCalls() > 0) controller.abort();
+      return original(id);
+    };
     const app = buildTestApp({ researchEvents: source }, {}, controller.signal);
-    setTimeout(() => controller.abort(), 50);
     const res = await request(app).get(`/api/v1/research-runs/${RUN}/events`).set(auth);
     expect(ids(res.text)).toEqual([1]);
     expect(res.text).not.toContain("event: end");
