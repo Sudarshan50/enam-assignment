@@ -1,0 +1,15 @@
+{
+  "name": "@finn/ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@finn/db": "*",
+    "@finn/shared": "*",
+    "openai": "^7.57.0"
+  }
+}

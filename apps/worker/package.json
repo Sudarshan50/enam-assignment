@@ -1,0 +1,19 @@
+{
+  "name": "@finn/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "cli": "node --env-file-if-exists=../../.env --import tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@finn/ai": "*",
+    "@finn/db": "*",
+    "@finn/domain": "*",
+    "@finn/financials": "*",
+    "@finn/shared": "*",
+    "@finn/sources": "*",
+    "pino": "^10.4.0",
+    "web-push": "^4.0.0"
+  }
+}
