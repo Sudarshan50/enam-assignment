@@ -36,7 +36,7 @@ describe.skipIf(!dbUp)("research runs against the local database", async () => {
 
   beforeAll(async () => {
     await cleanupPrefix(sql, P);
-    for (const s of ["NEW", "RACE", "CACHE", "OLD", "FAIL", "QUOTA", "Q"]) await insertCompany(sql, `${P}${s}`);
+    for (const s of ["NEW", "RACE", "CACHE", "OLD", "DEAD", "FAIL", "QUOTA", "Q"]) await insertCompany(sql, `${P}${s}`);
   });
 
   afterAll(async () => {
@@ -151,6 +151,35 @@ describe.skipIf(!dbUp)("research runs against the local database", async () => {
     const res = await post(app, `${P}OLD`);
     expect(res.status).toBe(202);
     expect(res.body.runId).not.toBe(old!.id);
+    expect(dispatcher.dispatchResearch).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a module's automatic retry, and stops serving a completed run from cache once that retry gives up", async () => {
+    const symbol = `${P}DEAD`;
+    const [run] = await sql<{ id: string }[]>`
+      INSERT INTO research_runs (symbol, status, modules, created_at, updated_at)
+      VALUES (${symbol}, 'completed', ${["financial_snapshot", "bull_bear"]}::text[], now() - interval '1 day', now() - interval '1 day')
+      RETURNING id`;
+    await sql`
+      INSERT INTO research_modules (run_id, module, status, payload, error) VALUES
+        (${run!.id}, 'financial_snapshot', 'done', ${sql.json({ ok: true })}, null),
+        (${run!.id}, 'bull_bear', 'failed', null, 'LlmTransportError: LLM HTTP 503')`;
+    await sql`
+      INSERT INTO module_retries (symbol, module, run_id, attempts, reason, next_attempt_at)
+      VALUES (${symbol}, 'bull_bear', ${run!.id}, 2, 'LLM HTTP 503', '2026-11-15T07:00:00Z')`;
+    const { app, dispatcher } = await buildDbApp(sql);
+
+    const modules = async () => expectParse(ResearchRunSchema, (await request(app).get(`/api/v1/research-runs/${run!.id}`).set(auth)).body, "run").modules;
+    const pending = await modules();
+    expect(pending.find((m) => m.key === "bull_bear")).toMatchObject({ status: "failed", retry: { status: "pending", attempts: 2, nextAttemptAt: "2026-11-15T07:00:00.000Z" } });
+    expect(pending.find((m) => m.key === "financial_snapshot")).not.toHaveProperty("retry");
+    expect((await post(app, symbol)).body).toEqual({ runId: run!.id, status: "completed", cached: true });
+
+    await sql`UPDATE module_retries SET status = 'dead', attempts = 5 WHERE run_id = ${run!.id}`;
+    expect((await modules()).find((m) => m.key === "bull_bear")).toMatchObject({ retry: { status: "dead", attempts: 5, nextAttemptAt: null } });
+    const fresh = await post(app, symbol);
+    expect(fresh.status).toBe(202);
+    expect(fresh.body.runId).not.toBe(run!.id);
     expect(dispatcher.dispatchResearch).toHaveBeenCalledTimes(1);
   });
 

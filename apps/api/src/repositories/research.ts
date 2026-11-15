@@ -22,6 +22,7 @@ export function createResearchRepository(sql: Sql): ResearchRepository & Researc
       const [row] = await sql<RunRecord[]>`
         SELECT ${runColumns(sql)} FROM research_runs r
         WHERE r.symbol = ${symbol} AND r.status = 'completed' AND r.created_at >= ${since}
+          AND NOT EXISTS (SELECT 1 FROM module_retries mr WHERE mr.run_id = r.id AND mr.status = 'dead')
         ORDER BY r.created_at DESC LIMIT 1`;
       return row ?? null;
     },
@@ -93,8 +94,11 @@ export function createResearchRepository(sql: Sql): ResearchRepository & Researc
 
     async listModules(runId) {
       return sql<ModuleRow[]>`
-        SELECT module, status, payload, error, updated_at AS "updatedAt"
-        FROM research_modules WHERE run_id = ${runId}`;
+        SELECT m.module, m.status, m.payload, m.error, m.updated_at AS "updatedAt",
+               r.status AS "retryStatus", r.attempts AS "retryAttempts", r.next_attempt_at AS "retryNextAt"
+        FROM research_modules m
+        LEFT JOIN module_retries r ON r.run_id = m.run_id AND r.module = m.module AND r.status <> 'resolved'
+        WHERE m.run_id = ${runId}`;
     },
 
     async listDocuments(symbol) {

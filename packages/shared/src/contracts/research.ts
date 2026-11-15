@@ -99,12 +99,21 @@ export const BusinessSnapshotPayloadSchema = z.object({
   segments: z.array(z.object({ name: z.string(), sharePct: z.number().nullable(), claim: ClaimSchema })),
 });
 
+/** An automatic retry of a module that failed or came back incomplete; dead means it gave up. */
+export const ModuleRetrySchema = z.object({
+  status: z.enum(["pending", "dead"]),
+  attempts: z.number().int().nonnegative(),
+  nextAttemptAt: z.string().nullable(),
+});
+export type ModuleRetry = z.infer<typeof ModuleRetrySchema>;
+
 export const ResearchModuleSchema = z.object({
   key: ModuleKeySchema,
   status: ModuleStatusSchema,
   payload: z.unknown().nullable(),
   error: z.string().nullable(),
   updatedAt: z.string(),
+  retry: ModuleRetrySchema.optional(),
 });
 export type ResearchModule = z.infer<typeof ResearchModuleSchema>;
 

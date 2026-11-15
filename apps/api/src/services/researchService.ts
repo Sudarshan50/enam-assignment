@@ -13,7 +13,7 @@ import type { WorkerDispatcher } from "../adapters/workerDispatcher";
 import type { CompanyResearch, CreateResearchRunResponse, PromiseLedger } from "../contracts";
 import { notFound, researchLimitReached } from "../http/errors";
 import type { Logger } from "../lib/logger";
-import { type Clock, DAY, MINUTE, startOfIstDay, systemClock, toIsoRequired } from "../lib/time";
+import { type Clock, DAY, MINUTE, startOfIstDay, systemClock, toIso, toIsoRequired } from "../lib/time";
 
 export interface RunRecord {
   id: string;
@@ -31,6 +31,9 @@ export interface ModuleRow {
   payload: unknown;
   error: string | null;
   updatedAt: Date;
+  retryStatus?: string | null;
+  retryAttempts?: number | null;
+  retryNextAt?: Date | null;
 }
 
 export interface DocumentRow {
@@ -95,12 +98,16 @@ export function toModules(run: Pick<RunRecord, "modules" | "updatedAt">, rows: M
     const key = ModuleKeySchema.safeParse(row.module);
     if (!key.success) continue;
     const status = ModuleStatusSchema.safeParse(row.status);
+    const retryStatus = row.retryStatus === "pending" || row.retryStatus === "dead" ? row.retryStatus : null;
     byKey.set(key.data, {
       key: key.data,
       status: status.success ? status.data : "failed",
       payload: row.payload ?? null,
       error: row.error,
       updatedAt: toIsoRequired(row.updatedAt),
+      ...(retryStatus
+        ? { retry: { status: retryStatus, attempts: row.retryAttempts ?? 0, nextAttemptAt: retryStatus === "pending" ? toIso(row.retryNextAt) : null } }
+        : {}),
     });
   }
   for (const m of run.modules) {
