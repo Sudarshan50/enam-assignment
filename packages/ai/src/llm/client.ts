@@ -55,6 +55,17 @@ function schemaName(task: string): string {
   return task.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) || "response";
 }
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** In json_object mode GLM sometimes nests the answer one level down: {"<task>": {...}} or {"properties": {...}}. */
+export function envelopeContent(json: unknown): unknown {
+  if (!isPlainObject(json)) return undefined;
+  if (isPlainObject(json.properties)) return json.properties;
+  const keys = Object.keys(json);
+  const only = keys.length === 1 ? json[keys[0]!] : undefined;
+  return isPlainObject(only) ? only : undefined;
+}
+
 function isRetryableTransportError(err: unknown): boolean {
   if (!(err instanceof LlmTransportError)) return true;
   const s = err.status;
@@ -165,9 +176,21 @@ export function createLlmClientFromDeps(deps: LlmClientDeps): LlmPort {
         let value: T;
         try {
           json = parseModelJson(content);
-          value = req.parse(json);
+          try {
+            value = req.parse(json);
+          } catch (err) {
+            const inner = envelopeContent(json);
+            if (inner === undefined) throw err;
+            try {
+              value = req.parse(inner);
+            } catch {
+              throw err;
+            }
+            json = inner;
+          }
         } catch (err) {
-          const reason = err instanceof SyntaxError ? `invalid JSON (${err.message})` : formatZodError(err);
+          const keys = isPlainObject(json) ? ` (top-level keys received: ${Object.keys(json).slice(0, 8).join(", ") || "none"})` : "";
+          const reason = err instanceof SyntaxError ? `invalid JSON (${err.message})` : `${formatZodError(err)}${keys}`;
           lastError = new LlmValidationError(`${req.task}: ${reason}`, req.task);
           await deps.ledger.record({ ...base, ...usage, cacheHit: false, status: "invalid", schemaValid: false, error: reason, latencyMs, attempt });
           if (reasked) throw lastError;

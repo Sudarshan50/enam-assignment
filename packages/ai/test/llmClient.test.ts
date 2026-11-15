@@ -105,6 +105,25 @@ describe("LLM client", () => {
     expect(t.requests[1]!.messages.at(-1)!.content).toMatch(/sentiment/);
   });
 
+  it.each([
+    ["a task-named wrapper", '{"sentiment_result":{"sentiment":"negative"}}'],
+    ["an echoed schema wrapper", '{"type":"object","properties":{"sentiment":"negative"}}'],
+  ])("accepts an answer nested one level down in %s, and caches the inner object", async (_label, content) => {
+    const t = scripted([content]);
+    const { llm, cache, ledger } = client(t);
+    await expect(llm.complete(request())).resolves.toEqual({ sentiment: "negative" });
+    expect([...cache.entries.values()][0]).toEqual({ sentiment: "negative" });
+    expect(ledger.rows.map((r) => r.status)).toEqual(["ok"]);
+  });
+
+  it("names the keys it did receive when the answer has the wrong shape", async () => {
+    const t = scripted(['{"bullCase":[],"bearCase":[]}', '{"sentiment":"positive"}']);
+    const { llm, ledger } = client(t);
+    await expect(llm.complete(request())).resolves.toEqual({ sentiment: "positive" });
+    expect(ledger.rows[0]!.error).toMatch(/top-level keys received: bullCase, bearCase/);
+    expect(t.requests[1]!.messages.at(-1)!.content).toMatch(/top-level keys received: bullCase, bearCase/);
+  });
+
   it("retries transport errors with backoff up to 3 attempts", async () => {
     const t = scripted([new LlmTransportError("HTTP 503", 503), new LlmTransportError("timeout"), '{"sentiment":"positive"}']);
     const { llm, ledger } = client(t);
