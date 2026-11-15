@@ -26,8 +26,24 @@ export interface ModuleCacheRow {
   status: string;
 }
 
+export interface ModuleRetryRow {
+  symbol: string;
+  module: string;
+  run_id: string;
+  status: "pending" | "resolved" | "dead";
+  attempts: number;
+  reason: string;
+  next_attempt_at: Date;
+  updated_at: Date;
+}
+
 /** A run whose worker stopped heartbeating for this long is considered abandoned and may be re-claimed. */
 export const STALE_HEARTBEAT_SECONDS = 300;
+
+/** Wait before each retry attempt of a module; once they are used up the retry is kept as dead. */
+export const MODULE_RETRY_BACKOFF_MS = [5, 15, 60, 180, 360].map((minutes) => minutes * 60_000);
+/** A claimed retry is skipped by other claimers for this long, in case its worker dies mid-attempt. */
+const MODULE_RETRY_LEASE_MS = 15 * 60_000;
 
 export function researchRepo(sql: Sql) {
   return {
@@ -177,6 +193,52 @@ export function researchRepo(sql: Sql) {
 
     async listModules(runId: string): Promise<{ module: string; status: ModuleRowStatus; payload: unknown; error: string | null; updated_at: Date }[]> {
       return sql`SELECT module, status, payload, error, updated_at FROM research_modules WHERE run_id = ${runId} ORDER BY module`;
+    },
+
+    /** Queues a module of `runId` for retry; a new failure restarts the backoff, as it carries newer inputs. */
+    async scheduleModuleRetry(input: { symbol: string; module: string; runId: string; reason: string }, now = new Date()): Promise<void> {
+      await sql`
+        INSERT INTO module_retries (symbol, module, run_id, status, attempts, reason, next_attempt_at)
+        VALUES (${input.symbol}, ${input.module}, ${input.runId}, 'pending', 0, ${input.reason.slice(0, 500)},
+                ${new Date(now.getTime() + MODULE_RETRY_BACKOFF_MS[0]!)})
+        ON CONFLICT (symbol, module) DO UPDATE SET
+          run_id = EXCLUDED.run_id, status = 'pending', attempts = 0, reason = EXCLUDED.reason,
+          next_attempt_at = EXCLUDED.next_attempt_at, updated_at = now()`;
+    },
+
+    async resolveModuleRetry(symbol: string, module: string): Promise<void> {
+      await sql`UPDATE module_retries SET status = 'resolved', updated_at = now() WHERE symbol = ${symbol} AND module = ${module} AND status <> 'resolved'`;
+    },
+
+    /** Claims due retries, skipping symbols with an active run (that run will write its own result). */
+    async claimDueModuleRetries(limit: number, now = new Date(), symbols?: readonly string[]): Promise<ModuleRetryRow[]> {
+      if (symbols && symbols.length === 0) return [];
+      return sql<ModuleRetryRow[]>`
+        UPDATE module_retries m SET next_attempt_at = ${new Date(now.getTime() + MODULE_RETRY_LEASE_MS)}, updated_at = now()
+        WHERE (m.symbol, m.module) IN (
+          SELECT x.symbol, x.module FROM module_retries x
+          WHERE x.status = 'pending' AND x.next_attempt_at <= ${now}
+            ${symbols ? sql`AND x.symbol IN ${sql(symbols)}` : sql``}
+            AND NOT EXISTS (
+              SELECT 1 FROM research_runs a WHERE a.symbol = x.symbol AND a.status IN ('queued','processing_docs','synthesizing'))
+          ORDER BY x.next_attempt_at
+          FOR UPDATE SKIP LOCKED
+          LIMIT ${limit})
+        RETURNING m.*`;
+    },
+
+    /** Records a failed attempt: waits `nextAttemptAt` for the next one, or dead-letters the retry when it is null. */
+    async recordModuleRetryFailure(input: { symbol: string; module: string; attempts: number; reason: string; nextAttemptAt: Date | null }): Promise<void> {
+      await sql`
+        UPDATE module_retries SET attempts = ${input.attempts}, reason = ${input.reason.slice(0, 500)},
+               status = ${input.nextAttemptAt ? "pending" : "dead"}, next_attempt_at = COALESCE(${input.nextAttemptAt}, next_attempt_at),
+               updated_at = now()
+        WHERE symbol = ${input.symbol} AND module = ${input.module}`;
+    },
+
+    async getModuleRetry(symbol: string, module: string): Promise<ModuleRetryRow | null> {
+      const [row] = await sql<ModuleRetryRow[]>`SELECT * FROM module_retries WHERE symbol = ${symbol} AND module = ${module}`;
+      return row ?? null;
     },
 
     async getModuleCache(cacheKey: string): Promise<ModuleCacheRow | null> {
