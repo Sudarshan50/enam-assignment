@@ -195,5 +195,5 @@ export function previewRule(text: string, now: Date): RulePreview {
     return { date: d.toISOString().slice(0, 10), symbol, detail: hitDetail(definition, rand) };
   }).sort((a, b) => b.date.localeCompare(a.date));
 
-  return { definition, resolvedSymbols: definition ? resolvedSymbols : [], explanation, name, backtest: definition ? { fires, sessions: 30, hits } : null };
+  return { definition, resolvedSymbols: definition ? resolvedSymbols : [], explanation, name, backtest: definition ? { fires, sessions: 30, hits, note: null } : null };
 }

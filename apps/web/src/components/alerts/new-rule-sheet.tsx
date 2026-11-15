@@ -85,9 +85,10 @@ function PreviewView({ preview }: { preview: RulePreview }) {
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : preview.backtest.fires === 0 ? (
             <p className="mt-2 text-[12.5px] text-ink-faint">Quiet over this period — a sign the threshold is meaningful, or too strict.</p>
-          )}
+          ) : null}
+          {preview.backtest.note ? <p className="mt-2 text-[12.5px] text-ink-faint">{preview.backtest.note}</p> : null}
         </div>
       ) : null}
     </motion.div>

@@ -67,6 +67,7 @@ export function usePush() {
         return setState("on");
       }
       const key = await systemApi.getVapidKey();
+      if (!key) throw new Error("Notifications aren't set up on this server yet");
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToBytes(key) });
       await systemApi.savePushSubscription(sub.toJSON());
       setState("on");

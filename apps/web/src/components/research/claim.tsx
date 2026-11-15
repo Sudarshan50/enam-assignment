@@ -14,13 +14,17 @@ function shortLabel(c: Citation): string {
 export function CitationChips({ citations, claim }: { citations: Citation[]; claim?: string }) {
   const { open } = useCitations();
   if (citations.length === 0) return null;
+  // One claim may quote the same chunk several times; one chip per chunk, every quote in the sheet.
+  const chips = citations.filter((c, i) => citations.findIndex((x) => x.chunkId === c.chunkId) === i);
   return (
     <span className="inline-flex flex-wrap gap-1 align-baseline">
-      {citations.map((c, i) => (
+      {chips.map((c, i) => (
         <button
           key={c.chunkId}
           type="button"
-          onClick={() => open(i === 0 ? citations : [c, ...citations.filter((x) => x !== c)], claim)}
+          onClick={() =>
+            open(i === 0 ? citations : [...citations.filter((x) => x.chunkId === c.chunkId), ...citations.filter((x) => x.chunkId !== c.chunkId)], claim)
+          }
           aria-label={`Source: ${c.documentLabel}${c.page ? `, page ${c.page}` : ""}`}
           className="relative inline-flex h-[22px] items-center rounded-[5px] border border-amber/30 bg-amber-soft px-1.5 font-mono text-[10.5px] leading-none text-amber transition-colors after:absolute after:-inset-x-0.5 after:-inset-y-[11px] after:content-[''] hover:border-amber/60"
         >

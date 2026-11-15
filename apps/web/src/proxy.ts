@@ -4,10 +4,10 @@ const COOKIE = "finn_access";
 const THIRTY_DAYS = 60 * 60 * 24 * 30;
 const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS === "1";
 
-function safeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+/** Always walks the full expected token, so timing reveals neither the mismatch position nor its length. */
+function safeEqual(presented: string, expected: string): boolean {
+  let diff = presented.length ^ expected.length;
+  for (let i = 0; i < expected.length; i++) diff |= (i < presented.length ? presented.charCodeAt(i) : 0) ^ expected.charCodeAt(i);
   return diff === 0;
 }
 

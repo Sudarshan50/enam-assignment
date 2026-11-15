@@ -31,10 +31,10 @@ export function CitationProvider({ children }: { children: ReactNode }) {
       <Sheet open={state !== null} onClose={close} kicker={count > 1 ? `${count} sources` : "Source"} title={count > 1 ? "Where this comes from" : (state?.citations[0]?.documentLabel ?? "Source")}>
         {state?.claim ? <p className="mb-5 text-[14px] leading-relaxed text-ink-muted">{state.claim}</p> : null}
         <ol className="space-y-6">
-          {state?.citations.map((c) => {
+          {state?.citations.map((c, i) => {
             const href = pageUrl(c);
             return (
-              <li key={c.chunkId}>
+              <li key={`${c.chunkId}:${i}`}>
                 <p className="flex items-center gap-2 font-mono text-[11px] text-ink-faint">
                   <FileText className="size-3.5" aria-hidden />
                   {c.documentLabel}

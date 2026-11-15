@@ -7,7 +7,7 @@ import { CorporateActionCard, CreditRatingCard, DealCard, GenericCard, Litigatio
 type CardProps<K extends Card["kind"]> = { card: Extract<Card, { kind: K }>; item: DigestItem };
 
 /** One presentational component per card kind; adding a kind to the schema forces an entry here. */
-const CARD_REGISTRY: { [K in Card["kind"]]: ComponentType<CardProps<K>> } = {
+export const CARD_REGISTRY: { [K in Card["kind"]]: ComponentType<CardProps<K>> } = {
   results: ResultsCard,
   management_change: ManagementChangeCard,
   deal: DealCard,

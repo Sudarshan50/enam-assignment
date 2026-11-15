@@ -73,6 +73,10 @@ export function useResearch(symbol: string) {
         if (event.type === "run.completed" || event.type === "run.failed") setTransport("idle");
       },
       onFallback: () => setTransport("polling"),
+      onEnd: () => {
+        setTransport("idle");
+        void refreshRun();
+      },
     });
     return () => {
       if (pending) clearTimeout(pending);

@@ -119,7 +119,8 @@ export function DigestItem({
                 <span className={cn("kicker pr-1", TIER_TEXT[item.tier])}>{CATEGORY_LABELS[item.category]}</span>
                 {item.reasonCodes
                   .map(humanizeReason)
-                  .filter((r) => r.toLowerCase() !== CATEGORY_LABELS[item.category].toLowerCase())
+                  .filter((r): r is string => r !== null && r.toLowerCase() !== CATEGORY_LABELS[item.category].toLowerCase())
+                  .filter((r, i, all) => all.indexOf(r) === i)
                   .slice(0, 4)
                   .map((r) => (
                     <ReasonChip key={r}>{r}</ReasonChip>

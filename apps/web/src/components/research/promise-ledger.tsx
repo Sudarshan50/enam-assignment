@@ -160,17 +160,31 @@ export function PromiseLedger({ ledger }: { ledger: Ledger }) {
 
   return (
     <div>
-      <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
-        <p className="font-display text-[64px] leading-[0.9] tracking-[-0.02em] text-ink tnum sm:text-[76px]" aria-label={`Delivered ${summary.delivered} of ${summary.elapsed}`}>
-          {summary.delivered}
-          <span className="text-ink-faint"> of {summary.elapsed}</span>
-        </p>
-        <p className="pb-1.5 text-[15px] leading-snug text-ink-muted">
-          promises delivered
-          <br />
-          whose deadline has passed
-        </p>
-      </div>
+      {summary.elapsed > 0 ? (
+        <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+          <p className="font-display text-[64px] leading-[0.9] tracking-[-0.02em] text-ink tnum sm:text-[76px]" aria-label={`Delivered ${summary.delivered} of ${summary.elapsed}`}>
+            {summary.delivered}
+            <span className="text-ink-faint"> of {summary.elapsed}</span>
+          </p>
+          <p className="pb-1.5 text-[15px] leading-snug text-ink-muted">
+            promises delivered
+            <br />
+            whose deadline has passed
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+          <p className="font-display text-[64px] leading-[0.9] tracking-[-0.02em] text-ink tnum sm:text-[76px]" aria-label={`None due yet, ${summary.pending} open`}>
+            {summary.pending}
+            <span className="text-ink-faint"> open</span>
+          </p>
+          <p className="pb-1.5 text-[15px] leading-snug text-ink-muted">
+            {summary.pending === 1 ? "promise" : "promises"} made;
+            <br />
+            none has reached its deadline yet
+          </p>
+        </div>
+      )}
 
       <div className="mt-5 flex flex-wrap gap-1.5" role="img" aria-label={`${summary.delivered} delivered, ${summary.missed} missed, ${summary.quietlyDropped} quietly dropped, ${summary.pending} pending`}>
         {tally.map((p, i) => (

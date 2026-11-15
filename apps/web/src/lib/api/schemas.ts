@@ -34,10 +34,12 @@ export const CompanySearchResultSchema = z
     name: z.string(),
     statementFamily: StatementFamilySchema.nullable().optional(),
     inPortfolio: z.boolean().optional(),
+    isHolding: z.boolean().optional(),
     researchReady: z.boolean().optional(),
   })
-  .loose();
-export type CompanySearchResult = z.infer<typeof CompanySearchResultSchema>;
+  .loose()
+  .transform(({ isHolding, ...rest }) => ({ ...rest, inPortfolio: rest.inPortfolio ?? isHolding }));
+export type CompanySearchResult = z.output<typeof CompanySearchResultSchema>;
 export const CompanySearchResponseSchema = listOf(CompanySearchResultSchema, "results");
 
 export const StartRunResponseSchema = z.object({
@@ -52,22 +54,39 @@ export const SymbolResearchResponseSchema = z
   .union([z.object({ run: ResearchRunSchema.nullable() }).loose(), ResearchRunSchema, z.null()])
   .transform((value) => {
     if (value === null) return { run: null };
-    if ("run" in value && !("symbol" in value)) return { run: value.run };
+    // The API envelope also carries `symbol`/`modules`; a bare run never has a `run` key.
+    if ("run" in value) return { run: value.run as z.infer<typeof ResearchRunSchema> | null };
     return { run: value as z.infer<typeof ResearchRunSchema> };
   });
 
-export const BacktestSchema = z.object({
-  fires: z.number().int(),
-  sessions: z.number().int(),
-  hits: z.array(z.object({ date: z.string(), symbol: z.string(), detail: z.string() })).default([]),
-});
-export type Backtest = z.infer<typeof BacktestSchema>;
+const BacktestHitSchema = z.object({ date: z.string(), symbol: z.string(), detail: z.string() });
+
+/** Per-session `hits`, or the API's per-symbol `bySymbol` summary (mapped onto each symbol's last fire). */
+export const BacktestSchema = z
+  .object({
+    fires: z.number().int(),
+    sessions: z.number().int(),
+    hits: z.array(BacktestHitSchema).optional(),
+    bySymbol: z.array(z.object({ symbol: z.string(), fires: z.number().int(), lastFiredOn: z.string().nullable() })).optional(),
+    note: z.string().nullable().optional(),
+  })
+  .transform(({ fires, sessions, hits, bySymbol, note }) => ({
+    fires,
+    sessions,
+    note: note ?? null,
+    hits:
+      hits ??
+      (bySymbol ?? []).flatMap((s) =>
+        s.lastFiredOn && s.fires > 0 ? [{ date: s.lastFiredOn, symbol: s.symbol, detail: s.fires === 1 ? "fired once" : `fired ${s.fires}× · last` }] : [],
+      ),
+  }));
+export type Backtest = z.output<typeof BacktestSchema>;
 
 export const RulePreviewSchema = PreviewAlertRuleResponseSchema.extend({
   name: z.string().optional(),
   backtest: BacktestSchema.nullable().optional(),
 });
-export type RulePreview = z.infer<typeof RulePreviewSchema>;
+export type RulePreview = z.output<typeof RulePreviewSchema>;
 
 export const CreateRuleInputSchema = z.object({ name: z.string().min(1).max(80), definition: AlertRuleDefinitionSchema });
 
@@ -77,9 +96,10 @@ export const EngineResponseSchema = EngineStatsSchema.extend({
 });
 export type EngineResponse = z.infer<typeof EngineResponseSchema>;
 
+/** Yields the key, or null when the server has push turned off (`{ enabled: false, publicKey: null }`). */
 export const VapidKeyResponseSchema = z
-  .union([z.object({ publicKey: z.string() }), z.object({ key: z.string() })])
-  .transform((value) => ("publicKey" in value ? value.publicKey : value.key));
+  .union([z.object({ enabled: z.boolean().optional(), publicKey: z.string().nullable() }), z.object({ key: z.string() })])
+  .transform((value) => ("key" in value ? value.key : value.enabled === false ? null : value.publicKey));
 
 export const PrefsSchema = z
   .object({

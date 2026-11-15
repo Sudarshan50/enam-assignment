@@ -24,15 +24,17 @@ export function formatMultiple(value: number | null | undefined, digits = 1): st
 
 export function formatBps(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
-  return `${sign}${Math.abs(Math.round(value)).toLocaleString("en-IN")} bps`;
+  const abs = Math.abs(Math.round(value));
+  const sign = abs === 0 ? "" : value > 0 ? "+" : "−";
+  return `${sign}${abs.toLocaleString("en-IN")} bps`;
 }
 
-/** Signed percentage with a true minus sign, for tables. */
+/** Signed percentage with a true minus sign, for tables. Values that round to zero are unsigned. */
 export function formatSignedPct(value: number | null | undefined, digits = 1): string {
   if (value == null || !Number.isFinite(value)) return "—";
-  const sign = value > 0 ? "+" : value < 0 ? "−" : "";
-  return `${sign}${Math.abs(value).toFixed(digits)}%`;
+  const abs = Math.abs(value).toFixed(digits);
+  const sign = Number(abs) === 0 ? "" : value > 0 ? "+" : "−";
+  return `${sign}${abs}%`;
 }
 
 export function formatPlainPct(value: number | null | undefined, digits = 1): string {
@@ -73,9 +75,36 @@ export function timeAgo(iso: string, now: Date = new Date()): string {
   return istDateShort(iso);
 }
 
-/** "pat_yoy_+14.9%" → "PAT YoY +14.9%". Codes that already read as text pass through. */
-export function humanizeReason(code: string): string {
+/** Classifier provenance (which rule or field matched); the category kicker already says what it is. */
+const HIDDEN_REASON_KEYS = new Set(["category", "subject", "text"]);
+
+const REASON_PHRASES: Record<string, string> = {
+  llm_unavailable: "Rule-classified",
+  routine: "Routine",
+  "seniority:kmp": "KMP",
+  "seniority:board_or_cxo": "Board / CXO",
+  "seniority:senior_management": "Senior management",
+};
+
+/**
+ * "pat_yoy_+14.9%" → "PAT YoY +14.9%"; "size:small_vs_mcap" → "Small vs mcap". Returns null for codes
+ * that only record how the classifier decided ("category:results", "subject:generic", "text:…").
+ * Codes that already read as text pass through.
+ */
+export function humanizeReason(code: string): string | null {
   if (/\s/.test(code)) return code;
+  if (REASON_PHRASES[code]) return REASON_PHRASES[code];
+  const colon = code.indexOf(":");
+  if (colon > 0) {
+    const key = code.slice(0, colon).toLowerCase();
+    const value = code.slice(colon + 1);
+    if (HIDDEN_REASON_KEYS.has(key) || !value) return null;
+    if (key === "impact") {
+      const n = Number(value);
+      return !Number.isFinite(n) ? null : n >= 1.1 ? "Large for the company" : n <= 0.9 ? "Minor for the company" : null;
+    }
+    return humanizeReason(value);
+  }
   const words = code.split("_").filter(Boolean);
   const acronyms = new Set(["pat", "pbt", "nii", "ebitda", "ppop", "cfo", "ceo", "cxo", "md", "ncd", "xbrl", "agm", "egm", "esop", "mcap"]);
   return words
