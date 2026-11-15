@@ -42,7 +42,7 @@ const completion = (content: string | null, usage = true) => ({
 });
 
 describe("OpenAI-compatible transport", () => {
-  it("posts the chat request and maps content and usage", async () => {
+  it("posts the chat request and maps content, usage and finish reason", async () => {
     handler = (_b, res) => json(res, 200, completion('{"ok":true}'));
     const t = createOpenAiTransport({ baseURL, apiKey: "test-key" });
     const out = await t.chat({
@@ -52,7 +52,7 @@ describe("OpenAI-compatible transport", () => {
       maxTokens: 50,
       temperature: 0,
     });
-    expect(out).toEqual({ content: '{"ok":true}', promptTokens: 11, completionTokens: 3 });
+    expect(out).toEqual({ content: '{"ok":true}', promptTokens: 11, completionTokens: 3, finishReason: "stop" });
     expect(received.at(-1)).toMatchObject({
       path: "/v1/chat/completions",
       auth: "Bearer test-key",

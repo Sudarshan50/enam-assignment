@@ -144,6 +144,7 @@ export function createLlmClientFromDeps(deps: LlmClientDeps): LlmPort {
         const started = Date.now();
         let content: string;
         let usage: { promptTokens: number | null; completionTokens: number | null };
+        let cutOff: boolean;
         try {
           const res = await deps.transport.chat({
             model: deps.model,
@@ -154,6 +155,7 @@ export function createLlmClientFromDeps(deps: LlmClientDeps): LlmPort {
           });
           content = res.content;
           usage = { promptTokens: res.promptTokens, completionTokens: res.completionTokens };
+          cutOff = res.finishReason === "length" || (req.maxTokens !== undefined && res.completionTokens !== null && res.completionTokens >= req.maxTokens);
         } catch (err) {
           const latencyMs = Date.now() - started;
           if (err instanceof UnsupportedResponseFormatError && formatMode === "json_schema") {
@@ -190,11 +192,24 @@ export function createLlmClientFromDeps(deps: LlmClientDeps): LlmPort {
           }
         } catch (err) {
           const keys = isPlainObject(json) ? ` (top-level keys received: ${Object.keys(json).slice(0, 8).join(", ") || "none"})` : "";
-          const reason = err instanceof SyntaxError ? `invalid JSON (${err.message})` : `${formatZodError(err)}${keys}`;
+          const reason = cutOff
+            ? `response cut off at the ${req.maxTokens ?? "provider"} token limit before the JSON was complete`
+            : err instanceof SyntaxError
+              ? `invalid JSON (${err.message})`
+              : `${formatZodError(err)}${keys}`;
           lastError = new LlmValidationError(`${req.task}: ${reason}`, req.task);
           await deps.ledger.record({ ...base, ...usage, cacheHit: false, status: "invalid", schemaValid: false, error: reason, latencyMs, attempt });
           if (reasked) throw lastError;
           reasked = true;
+          // Echoing a runaway reply invites the model to continue it, so a cut-off reply is not sent back.
+          if (cutOff) {
+            followUps.push({
+              role: "user",
+              content:
+                "Your previous response was cut off at the token limit before the JSON was complete. Return the complete JSON object again, shorter: no repeated entries and only the essential text in each field.",
+            });
+            continue;
+          }
           followUps.push(
             { role: "assistant", content: content.slice(0, MAX_ECHOED_RESPONSE_CHARS) },
             {

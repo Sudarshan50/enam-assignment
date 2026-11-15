@@ -2,9 +2,11 @@ import { GUIDANCE_METRICS } from "@finn/shared/contracts/research";
 import { z } from "zod";
 import { UNTRUSTED_DATA_RULES } from "./sources";
 
-export const PROMPT_VERSION = "guidance_extract.v2";
+export const PROMPT_VERSION = "guidance_extract.v3";
 /** Stored on guidance_items; bump with the prompt so stale extractions are redone. */
-export const EXTRACTOR_VERSION = 2;
+export const EXTRACTOR_VERSION = 3;
+/** A typical call yields under 15 items; the cap keeps a runaway reply inside the token limit. */
+export const MAX_ITEMS = 30;
 export const TASK = "guidance_extract";
 
 export const GuidanceExtractionSchema = z.object({
@@ -51,6 +53,7 @@ export const SYSTEM = [
     "- withdrawn: true only when management explicitly withdraws, suspends or abandons earlier guidance in this call (still give the metric and horizon of the guidance withdrawn).",
     "- speaker: name or role of the management speaker when shown, else null.",
     "- sourceId: id of the source containing the statement. quote: the exact sentence(s) copied character-for-character from that source (no paraphrase).",
+    `- List each statement once: when management repeats the same number for the same metric and horizon, give its clearest instance. Return at most ${MAX_ITEMS} items, the most specific first.`,
   ].join("\n"),
   "Return an empty items array if there is no qualifying guidance. Never invent numbers.",
 ].join("\n\n");

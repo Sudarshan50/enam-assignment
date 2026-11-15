@@ -164,6 +164,51 @@ describe("LLM client parsing and re-ask", () => {
     expect(followUp.at(-1)!.content).toMatch(/rejected by the validator: score: .*(10|less than)/i);
   });
 
+  describe("a reply cut off at the token limit", () => {
+    function cutOffClient(replies: ChatResponse[]) {
+      const requests: ChatRequest[] = [];
+      const transport: ChatTransport = {
+        async chat(r) {
+          requests.push(structuredClone(r));
+          return replies.shift()!;
+        },
+      };
+      const ledger = createMemoryLedger();
+      const llm = createLlmClientFromDeps({ transport, model: "m", cache: createMemoryLlmCache(), ledger, dailyCallBudget: 50, sleep: async () => {} });
+      return { llm, ledger, requests };
+    }
+    const runaway = `{"items":[${'{"verdict":"buy"},'.repeat(400)}{"verd`;
+
+    it("is reported as cut off and re-asked for a shorter answer without echoing the runaway reply", async () => {
+      const { llm, ledger, requests } = cutOffClient([
+        { content: runaway, promptTokens: 50, completionTokens: 6000, finishReason: "length" },
+        { content: OK, promptTokens: 60, completionTokens: 9, finishReason: "stop" },
+      ]);
+      await expect(llm.complete({ ...req(), maxTokens: 6000 })).resolves.toEqual({ verdict: "buy", score: 7 });
+      const followUp = requests[1]!.messages;
+      expect(followUp.map((m) => m.role)).toEqual(["system", "user", "user"]);
+      expect(followUp.at(-1)!.content).toMatch(/cut off at the token limit.*shorter/);
+      expect(ledger.rows[0]).toMatchObject({ status: "invalid", error: "response cut off at the 6000 token limit before the JSON was complete" });
+    });
+
+    it("is recognised from the token count when the provider gives no finish reason", async () => {
+      const { llm } = cutOffClient([
+        { content: runaway, promptTokens: 50, completionTokens: 6000 },
+        { content: runaway, promptTokens: 50, completionTokens: 6000 },
+      ]);
+      await expect(llm.complete({ ...req(), maxTokens: 6000 })).rejects.toThrow("rate: response cut off at the 6000 token limit before the JSON was complete");
+    });
+
+    it("does not count as cut off when the reply ended on its own", async () => {
+      const { llm, requests } = cutOffClient([
+        { content: "{verdict: buy", promptTokens: 50, completionTokens: 12, finishReason: "stop" },
+        { content: OK, promptTokens: 50, completionTokens: 9, finishReason: "stop" },
+      ]);
+      await llm.complete({ ...req(), maxTokens: 6000 });
+      expect(requests[1]!.messages.at(-1)!.content).toMatch(/rejected by the validator: invalid JSON/);
+    });
+  });
+
   it("never re-asks twice: a second invalid answer raises LlmValidationError with the task", async () => {
     const { llm, t } = client(["nope", "still nope", OK]);
     const err = await llm.complete(req()).catch((e: unknown) => e);

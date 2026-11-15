@@ -22,6 +22,8 @@ export interface ChatResponse {
   content: string;
   promptTokens: number | null;
   completionTokens: number | null;
+  /** "length" when the reply was cut off at maxTokens. */
+  finishReason?: string | null;
 }
 
 /** The only thing the client needs from a provider; tests inject a fake. */
@@ -56,6 +58,7 @@ export function createOpenAiTransport(opts: { baseURL: string; apiKey: string; t
           content: message.content,
           promptTokens: res.usage?.prompt_tokens ?? null,
           completionTokens: res.usage?.completion_tokens ?? null,
+          finishReason: choice?.finish_reason ?? null,
         };
       } catch (err) {
         if (err instanceof LlmTransportError) throw err;
