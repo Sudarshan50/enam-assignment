@@ -53,6 +53,27 @@ describe.skipIf(!dbUp)("response contracts against the local database", async ()
   // Contract checks happen in the test, as in production where response validation is off.
   const { app } = await buildDbApp(sql, { config: { responseValidation: "off" } });
 
+  // Seed loads companies only. These three rows are what a fresh CI database has to contract-check:
+  // a cluster head, a row with a card, and a linked child. Other suites only delete ZT* and DEMO-* rows.
+  const card = {
+    kind: "credit_rating" as const,
+    agency: "CRISIL",
+    instrument: "Long-term bank facilities",
+    previousRating: "AA",
+    newRating: "AA+",
+    outlook: "Stable",
+    action: "upgrade" as const,
+  };
+  await sql`
+    INSERT INTO announcements (seq_id, symbol, headline, published_at, raw, category, category_source, score, reason_codes, tier, status, one_liner, card)
+    VALUES ('CI-CONTRACT-HEAD', 'TCS', 'Contract fixture head', now(), ${sql.json({ fixture: true })}, 'results', 'rule', 80, ${["results"]}::text[], 'act', 'ready', 'Fixture head', NULL),
+           ('CI-CONTRACT-CARD', 'TCS', 'Contract fixture card', now(), ${sql.json({ fixture: true })}, 'credit_rating', 'rule', 60, ${["credit_rating"]}::text[], 'know', 'ready', 'Fixture card', ${sql.json(card)})
+    ON CONFLICT (seq_id) DO NOTHING`;
+  await sql`
+    INSERT INTO announcements (seq_id, symbol, headline, published_at, raw, category, category_source, score, tier, status, one_liner, parent_seq_id)
+    VALUES ('CI-CONTRACT-CHILD', 'TCS', 'Contract fixture child', now(), ${sql.json({ fixture: true })}, 'results', 'rule', 10, 'noise', 'ready', 'Fixture child', 'CI-CONTRACT-HEAD')
+    ON CONFLICT (seq_id) DO NOTHING`;
+
   // Real rows only: other suites create and delete ZT* rows concurrently.
   const companies = (await sql<{ symbol: string }[]>`SELECT symbol FROM companies WHERE symbol NOT LIKE 'ZT%' ORDER BY symbol`).map((r) => r.symbol);
   const runIds = (await sql<{ id: string }[]>`SELECT id FROM research_runs WHERE symbol NOT LIKE 'ZT%' ORDER BY created_at DESC LIMIT 25`).map((r) => r.id);
@@ -66,6 +87,8 @@ describe.skipIf(!dbUp)("response contracts against the local database", async ()
   ).map((r) => r.seqId);
 
   afterAll(async () => {
+    await sql`UPDATE announcements SET parent_seq_id = NULL WHERE seq_id LIKE 'CI-CONTRACT-%'`;
+    await sql`DELETE FROM announcements WHERE seq_id LIKE 'CI-CONTRACT-%'`;
     await closeDb();
   });
 
