@@ -1,0 +1,16 @@
+{
+  "name": "@finn/sources",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@finn/shared": "*",
+    "fflate": "^0.8.3",
+    "node-html-parser": "^9.0.7",
+    "unpdf": "^2.2.1"
+  }
+}
