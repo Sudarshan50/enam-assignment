@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Check, ChevronDown, CircleAlert } from "lucide-react";
 import { useId, useState } from "react";
 import { cn } from "@/lib/cn";
-import { istDateTime } from "@/lib/format";
+import { istDateTime, plural } from "@/lib/format";
 import { isTerminalStatus, type Transport } from "@/lib/hooks/use-research";
 
 function EventRow({ event, live, first }: { event: ResearchEvent; live: boolean; first: ResearchEvent | undefined }) {
@@ -50,7 +50,13 @@ export function ResearchProgress({ run, events, transport }: { run: ResearchRun 
   const terminal = isTerminalStatus(run?.status);
   const [open, setOpen] = useState(false);
   const id = useId();
-  const discovered = events.find((e) => e.type === "document.discovered");
+  const docs = run?.documents ?? [];
+  const read = docs.filter((d) => d.status === "ready");
+  const reports = read.filter((d) => /^annual report/i.test(d.label)).length;
+  const calls = read.length - reports;
+  const built = docs.length
+    ? `${read.length} of ${docs.length} documents read: ${reports} ${plural(reports, "annual report")}, ${calls} ${plural(calls, "call")}`
+    : "No documents found";
 
   if (terminal) {
     return (
@@ -65,7 +71,7 @@ export function ResearchProgress({ run, events, transport }: { run: ResearchRun 
           <span className="min-w-0">
             <span className="kicker block text-ink-faint">How this was built</span>
             <span className="block truncate text-[13.5px] text-ink-muted">
-              {discovered?.message ?? `${run?.documents.length ?? 0} documents`}
+              {built}
               {run ? ` · ${istDateTime(run.updatedAt)}` : ""}
             </span>
           </span>

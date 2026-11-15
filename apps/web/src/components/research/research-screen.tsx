@@ -150,7 +150,7 @@ export function ResearchScreen({ symbol }: { symbol: string }) {
         <ModuleFrame
           index={1}
           title="Promise Ledger"
-          subtitle="What management guided on the last four calls, against what they later filed."
+          subtitle="What management guided on recent earnings calls, against what they later filed."
           module={moduleOf(run, "promise_ledger")}
           schema={PromiseLedgerPayloadSchema}
         >
