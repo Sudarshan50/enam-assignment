@@ -12,6 +12,7 @@
  *   npm run demo-data -w @finn/api -- --wipe  # remove demo rows only
  */
 import { type Sql, closeDb, getDb } from "@finn/db";
+import { SEED_COMPANIES } from "@finn/db/seed";
 import {
   BullBearPayloadSchema,
   type Card,
@@ -435,8 +436,11 @@ const CDSL_CHUNKS = [
 ];
 
 export async function seedDemoData(sql: Sql, now = new Date()): Promise<{ announcements: number; prices: number; runId: string }> {
-  await wipeDemoData(sql);
-  const holdings = (await sql<{ symbol: string }[]>`SELECT symbol FROM holdings ORDER BY symbol`).map((r) => r.symbol);
+  // Only the seeded demo portfolio: other rows in holdings may belong to concurrently running tests.
+  const seeded = SEED_COMPANIES.filter((c) => c.holding).map((c) => c.symbol);
+  const holdings = (await sql<{ symbol: string }[]>`SELECT symbol FROM holdings WHERE symbol = ANY(${seeded}::text[]) ORDER BY symbol`).map(
+    (r) => r.symbol,
+  );
   const companies = new Set((await sql<{ symbol: string }[]>`SELECT symbol FROM companies`).map((r) => r.symbol));
   if (!companies.has("CDSL") || !companies.has("TCS")) throw new Error("Run `npm run seed -w @finn/db` first (companies missing)");
 
@@ -449,7 +453,9 @@ export async function seedDemoData(sql: Sql, now = new Date()): Promise<{ announ
   const announcements = demoAnnouncements().filter((a) => companies.has(a.symbol));
 
   let runId = "";
+  // Wipe and re-insert atomically so concurrent readers never see the demo rows missing.
   await sql.begin(async (tx) => {
+    await wipeDemoData(tx as unknown as Sql);
     for (const p of prices) {
       await tx`
         INSERT INTO prices_eod (symbol, session_date, open, high, low, close, prev_close, volume, avg20_volume, source)
@@ -501,6 +507,7 @@ export async function seedDemoData(sql: Sql, now = new Date()): Promise<{ announ
       SELECT DISTINCT ON (p.symbol) p.symbol, p.session_date::text AS session_date, p.close::float8 AS close,
              COALESCE(p.prev_close, lag(p.close) OVER (PARTITION BY p.symbol ORDER BY p.session_date))::float8 AS prev_close
       FROM prices_eod p JOIN holdings h ON h.symbol = p.symbol
+      WHERE p.symbol = ANY(${seeded}::text[])
       ORDER BY p.symbol, p.session_date DESC`.then((rows) =>
       rows
         .filter((r) => r.prev_close > 0)
