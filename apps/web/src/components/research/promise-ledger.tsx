@@ -6,6 +6,8 @@ import { useState } from "react";
 import type { z } from "zod";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { cn } from "@/lib/cn";
+import { callLabel, STATEMENT_LABEL } from "@/lib/labels";
+import { QuoteShown } from "./citation-sheet";
 import { CitationChips } from "./claim";
 
 type Ledger = z.output<typeof PromiseLedgerPayloadSchema>;
@@ -99,7 +101,7 @@ function PromiseRow({ p }: { p: PromiseItem }) {
         <div className="min-w-0">
           <p className="text-[15px] font-medium text-ink">{METRIC_LABEL[p.metric]}</p>
           <p className="mt-0.5 font-mono text-[11px] text-ink-faint">
-            for {p.horizonLabel} · {p.statementType === "explicit_guidance" ? "explicit guidance" : p.statementType}
+            for {p.horizonLabel} · {STATEMENT_LABEL[p.statementType]}
           </p>
         </div>
         <Badge tone={v.tone} className="shrink-0">
@@ -130,9 +132,11 @@ function PromiseRow({ p }: { p: PromiseItem }) {
         <figcaption className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[12.5px] text-ink-faint">
           <span>
             {p.speaker ? `${p.speaker}, ` : ""}
-            {p.saidIn}
+            {callLabel(p.saidIn)}
           </span>
-          <CitationChips citations={[p.citation]} claim={`${METRIC_LABEL[p.metric]} for ${p.horizonLabel}: ${guided(p)}`} />
+          <QuoteShown quote={p.quote}>
+            <CitationChips citations={[p.citation]} claim={`${METRIC_LABEL[p.metric]} for ${p.horizonLabel}: ${guided(p)}`} />
+          </QuoteShown>
         </figcaption>
       </figure>
 
@@ -187,6 +191,21 @@ export function PromiseLedger({ ledger }: { ledger: Ledger }) {
             promises delivered
             <br />
             whose deadline has passed
+          </p>
+        </div>
+      ) : summary.quietlyDropped > 0 ? (
+        <div className="flex flex-wrap items-end gap-x-5 gap-y-2">
+          <p
+            className="font-display text-[64px] leading-[0.9] tracking-[-0.02em] text-ink tnum sm:text-[76px]"
+            aria-label={`None due yet, ${summary.quietlyDropped} quietly dropped, ${summary.pending} open`}
+          >
+            {summary.quietlyDropped}
+            <span className="text-ink-faint"> dropped</span>
+          </p>
+          <p className="pb-1.5 text-[15px] leading-snug text-ink-muted">
+            {summary.quietlyDropped === 1 ? "promise" : "promises"} quietly dropped
+            <br />
+            before any deadline; {summary.pending} still open
           </p>
         </div>
       ) : (

@@ -42,6 +42,10 @@ jobs:
       - run: npx tsc -p apps/api/tsconfig.json --noEmit
       - run: npx vitest run
       - run: npm run check-mocks -w @finn/web
+      - run: npm test -w @finn/web
       - run: npm run build -w @finn/web
         env:
           NEXT_PUBLIC_USE_MOCKS: "1"
+      - run: npm run build -w @finn/web
+        env:
+          API_ORIGIN: http://localhost:4000

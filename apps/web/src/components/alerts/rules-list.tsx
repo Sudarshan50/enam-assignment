@@ -4,7 +4,7 @@ import type { AlertRule } from "@finn/shared";
 import { Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Button, IconButton } from "@/components/ui/button";
-import { ListSkeleton } from "@/components/ui/states";
+import { ErrorState, ListSkeleton } from "@/components/ui/states";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
 import { alertsApi } from "@/lib/api";
@@ -32,7 +32,7 @@ function RuleRow({ rule, onToggle, onDelete }: { rule: AlertRule; onToggle: (v: 
 }
 
 export function RulesList() {
-  const { data, isLoading, mutate } = useAlertRules();
+  const { data, error, isLoading, mutate } = useAlertRules();
   const [creating, setCreating] = useState(false);
   const toast = useToast();
 
@@ -70,12 +70,18 @@ export function RulesList() {
           New rule
         </Button>
       </div>
+      {error && !data ? (
+        <div className="mt-4">
+          <ErrorState message={`Your rules didn't load. ${(error as Error).message}`} onRetry={() => void mutate()} />
+        </div>
+      ) : null}
       {isLoading ? <ListSkeleton rows={3} /> : null}
       <ul className="divide-y divide-rule">
         {data?.map((r) => (
           <RuleRow key={r.id} rule={r} onToggle={(v) => void toggle(r, v)} onDelete={() => void remove(r)} />
         ))}
       </ul>
+      {data && data.length === 0 ? <p className="py-8 text-center text-[14px] text-ink-muted">No rules yet. Add one and FINN starts watching.</p> : null}
       <NewRuleSheet
         open={creating}
         onClose={() => setCreating(false)}

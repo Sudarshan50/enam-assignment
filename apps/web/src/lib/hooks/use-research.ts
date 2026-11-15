@@ -90,7 +90,7 @@ export function useResearch(symbol: string) {
     transport,
     cached,
     starting: starting || (existing.isLoading && !existing.data),
-    error: startError ?? existing.error ?? run.error ?? null,
+    error: startError ?? (runId ? run.error : existing.error) ?? null,
     rebuild: start,
   };
 }

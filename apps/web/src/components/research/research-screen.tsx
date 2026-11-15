@@ -55,6 +55,7 @@ export function ResearchScreen({ symbol }: { symbol: string }) {
   const recent = useStoredList("finn:recent-tickers");
   const terminal = isTerminalStatus(run?.status);
   const name = run?.companyName ?? symbol;
+  const stalled = Boolean(error) && !run && !starting;
 
   useEffect(() => {
     recent.push(symbol);
@@ -106,9 +107,11 @@ export function ResearchScreen({ symbol }: { symbol: string }) {
                   aria-hidden
                   className={terminal ? "size-1.5 rounded-full bg-pos" : "finn-pulse size-1.5 rounded-full bg-amber"}
                 />
-                {STATUS_LINE[run.status]}
-                {terminal ? ` · ${istDateTime(run.updatedAt)}` : ""}
-                {cached && terminal ? <span className="text-ink-faint"> · from cache</span> : null}
+                <span>
+                  {STATUS_LINE[run.status]}
+                  {terminal ? ` · ${istDateTime(run.updatedAt)}` : ""}
+                  {cached && terminal ? <span className="text-ink-faint"> · from cache</span> : null}
+                </span>
               </>
             ) : starting ? (
               "Looking for earlier research…"
@@ -124,7 +127,10 @@ export function ResearchScreen({ symbol }: { symbol: string }) {
 
       {error ? (
         <div className="mt-6">
-          <ErrorState message={(error as Error).message} onRetry={() => void rebuild()} />
+          <ErrorState
+            message={stalled ? `Research on ${symbol} couldn't start. ${(error as Error).message}` : (error as Error).message}
+            onRetry={() => void rebuild()}
+          />
         </div>
       ) : null}
 
@@ -134,7 +140,7 @@ export function ResearchScreen({ symbol }: { symbol: string }) {
         </div>
       ) : null}
 
-      <nav aria-label="Jump to module" className="scrollbar-none -mx-5 mt-6 flex gap-1.5 overflow-x-auto px-5 lg:hidden">
+      <nav hidden={stalled} aria-label="Jump to module" className="scrollbar-none -mx-5 mt-6 flex gap-1.5 overflow-x-auto px-5 lg:hidden">
         {JUMP.map((j) => (
           <a
             key={j.key}
@@ -146,7 +152,7 @@ export function ResearchScreen({ symbol }: { symbol: string }) {
         ))}
       </nav>
 
-      <div>
+      <div hidden={stalled}>
         <ModuleFrame
           index={1}
           title="Promise Ledger"

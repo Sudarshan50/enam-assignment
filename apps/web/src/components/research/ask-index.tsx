@@ -45,7 +45,7 @@ export function AskIndex() {
   const recent = useStoredList("finn:recent-tickers");
   const holdings = useHoldings();
   const listId = useId();
-  const results = query.trim() ? (search.data ?? []) : [];
+  const results = query.trim() && !search.error ? (search.data ?? []) : [];
 
   const pick = (symbol: string) => {
     const s = symbol.trim().toUpperCase();
@@ -110,6 +110,13 @@ export function AskIndex() {
                   <ResultRow key={r.symbol} r={r} active={i === active} onPick={pick} />
                 ))}
               </ul>
+            ) : search.error ? (
+              <div className="flex min-h-14 items-center justify-between gap-3 px-4 text-[13.5px] text-ink-muted" role="alert">
+                <span>Search isn&apos;t responding right now.</span>
+                <button type="button" onClick={() => void search.mutate()} className="min-h-11 shrink-0 font-mono text-[12px] text-ink underline underline-offset-4">
+                  Retry
+                </button>
+              </div>
             ) : (
               <div className="flex min-h-14 items-center justify-between gap-3 px-4 text-[13.5px] text-ink-muted">
                 <span>{search.isLoading ? "Searching the NSE list…" : "No listed match. Try the exact NSE symbol."}</span>
@@ -130,7 +137,7 @@ export function AskIndex() {
             <h2 id="recent-title" className="kicker text-ink-faint">
               Recent
             </h2>
-            <button type="button" onClick={recent.clear} className="min-h-8 text-[12px] text-ink-faint hover:text-ink">
+            <button type="button" onClick={recent.clear} className="-mr-2 min-h-10 min-w-11 px-2 text-[12px] text-ink-faint hover:text-ink">
               Clear
             </button>
           </div>

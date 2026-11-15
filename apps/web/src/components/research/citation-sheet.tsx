@@ -4,13 +4,19 @@ import type { Citation } from "@finn/shared";
 import { ArrowUpRight, FileText } from "lucide-react";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { Sheet } from "@/components/ui/sheet";
+import { callLabel } from "@/lib/labels";
 
 interface CitationState {
   citations: Citation[];
   claim: string | null;
+  shownQuote: string | null;
 }
 
-const CitationContext = createContext<{ open: (citations: Citation[], claim?: string) => void } | null>(null);
+type Open = (citations: Citation[], claim?: string, shownQuote?: string) => void;
+
+const CitationContext = createContext<{ open: Open } | null>(null);
+
+const sameQuote = (a: string, b: string | null) => b !== null && a.replace(/\s+/g, " ").trim() === b.replace(/\s+/g, " ").trim();
 
 function pageUrl(c: Citation): string | null {
   if (!c.url) return null;
@@ -20,7 +26,7 @@ function pageUrl(c: Citation): string | null {
 
 export function CitationProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<CitationState | null>(null);
-  const open = useCallback((citations: Citation[], claim?: string) => setState({ citations, claim: claim ?? null }), []);
+  const open = useCallback<Open>((citations, claim, shownQuote) => setState({ citations, claim: claim ?? null, shownQuote: shownQuote ?? null }), []);
   const close = useCallback(() => setState(null), []);
   const value = useMemo(() => ({ open }), [open]);
   const count = state?.citations.length ?? 0;
@@ -28,7 +34,7 @@ export function CitationProvider({ children }: { children: ReactNode }) {
   return (
     <CitationContext.Provider value={value}>
       {children}
-      <Sheet open={state !== null} onClose={close} kicker={count > 1 ? `${count} sources` : "Source"} title={count > 1 ? "Where this comes from" : (state?.citations[0]?.documentLabel ?? "Source")}>
+      <Sheet open={state !== null} onClose={close} kicker={count > 1 ? `${count} sources` : "Source"} title={count > 1 ? "Where this comes from" : state?.citations[0] ? callLabel(state.citations[0].documentLabel) : "Source"}>
         {state?.claim ? <p className="mb-5 text-[14px] leading-relaxed text-ink-muted">{state.claim}</p> : null}
         <ol className="space-y-6">
           {state?.citations.map((c, i) => {
@@ -37,12 +43,14 @@ export function CitationProvider({ children }: { children: ReactNode }) {
               <li key={`${c.chunkId}:${i}`}>
                 <p className="flex items-center gap-2 font-mono text-[11px] text-ink-faint">
                   <FileText className="size-3.5" aria-hidden />
-                  {c.documentLabel}
+                  {callLabel(c.documentLabel)}
                   {c.page ? ` · page ${c.page}` : ""}
                 </p>
-                <blockquote className="mt-2.5 border-l-2 border-amber/60 pl-4 font-display text-[21px] leading-[1.35] text-ink italic">
-                  &ldquo;{c.quote}&rdquo;
-                </blockquote>
+                {sameQuote(c.quote, state?.shownQuote ?? null) ? null : (
+                  <blockquote className="mt-2.5 border-l-2 border-amber/60 pl-4 font-display text-[21px] leading-[1.35] text-ink italic">
+                    &ldquo;{c.quote}&rdquo;
+                  </blockquote>
+                )}
                 {href ? (
                   <a
                     href={href}
@@ -66,6 +74,16 @@ export function CitationProvider({ children }: { children: ReactNode }) {
       </Sheet>
     </CitationContext.Provider>
   );
+}
+
+/** Wrap chips whose quote is already printed beside them, so the sheet shows where it comes from without repeating it. */
+export function QuoteShown({ quote, children }: { quote: string; children: ReactNode }) {
+  const parent = useCitations();
+  const value = useMemo(() => {
+    const open: Open = (citations, claim) => parent.open(citations, claim, quote);
+    return { open };
+  }, [parent, quote]);
+  return <CitationContext.Provider value={value}>{children}</CitationContext.Provider>;
 }
 
 export function useCitations() {

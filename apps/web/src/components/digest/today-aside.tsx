@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { Delta } from "@/components/ui/delta";
 import { Sparkline } from "@/components/ui/sparkline";
-import { Skeleton } from "@/components/ui/states";
+import { ErrorState, Skeleton } from "@/components/ui/states";
 import { formatMultiple, formatPrice, timeAgo } from "@/lib/format";
 import { useAlerts, useHoldings } from "@/lib/hooks/data";
 import { useNow } from "@/lib/hooks/ui";
@@ -49,6 +49,12 @@ export function TodayAside() {
                 </li>
               ))}
         </ul>
+        {holdings.error && !holdings.data ? (
+          <div className="mt-3">
+            <ErrorState message={`Prices didn't load. ${(holdings.error as Error).message}`} onRetry={() => void holdings.mutate()} />
+          </div>
+        ) : null}
+        {holdings.data && holdings.data.length === 0 ? <p className="py-3 text-[13px] text-ink-faint">No holdings to show yet.</p> : null}
       </section>
 
       <section aria-labelledby="aside-alerts">
@@ -73,6 +79,12 @@ export function TodayAside() {
             </li>
           ))}
         </ul>
+        {alerts.error && !alerts.data ? (
+          <div className="mt-3">
+            <ErrorState message={`Alerts didn't load. ${(alerts.error as Error).message}`} onRetry={() => void alerts.mutate()} />
+          </div>
+        ) : null}
+        {alerts.data && alerts.data.length === 0 ? <p className="py-3 text-[13px] text-ink-faint">No alerts have triggered.</p> : null}
       </section>
 
       <Link

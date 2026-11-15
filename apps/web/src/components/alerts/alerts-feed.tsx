@@ -4,7 +4,7 @@ import type { Alert } from "@finn/shared";
 import { ArrowRight, ChartColumn, FileText, TrendingDown, TrendingUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { SymbolChip } from "@/components/ui/badge";
-import { ListSkeleton } from "@/components/ui/states";
+import { ErrorState, ListSkeleton } from "@/components/ui/states";
 import { alertsApi } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { timeAgo } from "@/lib/format";
@@ -19,7 +19,7 @@ function KindIcon({ alert }: { alert: Alert }) {
 }
 
 export function AlertsFeed() {
-  const { data, isLoading, mutate } = useAlerts();
+  const { data, error, isLoading, mutate } = useAlerts();
   const router = useRouter();
   const now = useNow();
   const unread = data?.filter((a) => !a.readAt).length ?? 0;
@@ -41,8 +41,13 @@ export function AlertsFeed() {
             Alerts
           </h2>
         </div>
-        <span className="pb-1 font-mono text-[12px] text-ink-faint">{unread ? `${unread} unread` : "all read"}</span>
+        <span className="pb-1 font-mono text-[12px] text-ink-faint">{data ? (unread ? `${unread} unread` : "all read") : null}</span>
       </div>
+      {error && !data ? (
+        <div className="mt-4">
+          <ErrorState message={`Your alerts didn't load. ${(error as Error).message}`} onRetry={() => void mutate()} />
+        </div>
+      ) : null}
       {isLoading ? <ListSkeleton rows={3} /> : null}
       <ul className="divide-y divide-rule">
         {data?.map((a) => (

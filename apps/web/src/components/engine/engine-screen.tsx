@@ -9,6 +9,7 @@ import { cn } from "@/lib/cn";
 import { formatCount, timeAgo } from "@/lib/format";
 import { useEngine } from "@/lib/hooks/data";
 import { useNow } from "@/lib/hooks/ui";
+import { purposeLabel } from "@/lib/labels";
 import { Pipeline, type Stage } from "./pipeline";
 
 const PUSH: Stage[] = [
@@ -135,7 +136,7 @@ export function EngineScreen() {
                   {data.byPurpose.map((p) => (
                     <tr key={p.purpose} className="border-t border-rule">
                       <th scope="row" className="py-2.5 text-left font-mono text-[12px] font-normal text-ink-muted">
-                        {p.purpose}
+                        {purposeLabel(p.purpose)}
                       </th>
                       <td className="py-2.5 text-right font-mono text-ink tnum">{int(p.calls)}</td>
                       <td className="py-2.5 text-right font-mono text-ink tnum">{formatCount(p.tokens, true)}</td>
