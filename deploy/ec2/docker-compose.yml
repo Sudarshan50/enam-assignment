@@ -1,0 +1,90 @@
+# FINN on a shared EC2 host. No host ports are published: the existing nginx on
+# lioxi-dashboard_default reaches finn-web and finn-api by name.
+name: finn
+
+x-app: &app
+  image: finn-app:latest
+  env_file: .env.production
+  restart: unless-stopped
+  networks: [finn]
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  finn-db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    mem_limit: 768m
+    environment:
+      POSTGRES_USER: finn
+      POSTGRES_DB: finn
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.production}
+    command: ["postgres", "-c", "shared_buffers=192MB", "-c", "work_mem=16MB", "-c", "maintenance_work_mem=128MB", "-c", "max_connections=40"]
+    volumes: [finn_pg:/var/lib/postgresql/data]
+    networks: [finn]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finn -d finn"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  finn-migrate:
+    <<: *app
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: "no"
+    command: ["sh", "-c", "node --import tsx packages/db/src/migrate.ts && node --import tsx packages/db/src/seed.ts"]
+    depends_on:
+      finn-db: { condition: service_healthy }
+
+  finn-api:
+    <<: *app
+    mem_limit: 384m
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+    command: ["node", "--import", "tsx", "apps/api/src/server.ts"]
+    networks:
+      finn: {}
+      edge: { aliases: [finn-api] }
+    depends_on:
+      finn-migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  finn-web:
+    <<: *app
+    mem_limit: 384m
+    working_dir: /app/apps/web
+    environment:
+      NODE_ENV: production
+    command: ["node", "../../node_modules/next/dist/bin/next", "start", "--port", "3000"]
+    networks:
+      finn: {}
+      edge: { aliases: [finn-web] }
+    depends_on:
+      finn-api: { condition: service_started }
+
+  finn-worker:
+    <<: *app
+    mem_limit: 1536m
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=1200
+    command: ["node", "--import", "tsx", "apps/worker/src/daemon.ts"]
+    depends_on:
+      finn-migrate: { condition: service_completed_successfully }
+
+volumes:
+  finn_pg: {}
+
+networks:
+  finn: {}
+  edge:
+    external: true
+    name: lioxi-dashboard_default

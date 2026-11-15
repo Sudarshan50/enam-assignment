@@ -1,0 +1,11 @@
+.git
+**/node_modules
+**/.next
+**/coverage
+**/.screenshots
+.env
+.env.*
+!.env.example
+deploy/ec2/.env.production
+tmp
+logs
