@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "node --env-file-if-exists=../../.env --watch --import tsx src/server.ts",
-    "start": "node --import tsx src/server.ts"
+    "start": "node --import tsx src/server.ts",
+    "demo-data": "node --env-file-if-exists=../../.env --import tsx scripts/demo-data.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --root ../.. apps/api"
   },
   "dependencies": {
     "@finn/ai": "*",
