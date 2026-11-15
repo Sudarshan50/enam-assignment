@@ -53,8 +53,8 @@ export async function seed(): Promise<void> {
       ON CONFLICT (symbol) DO UPDATE SET name = EXCLUDED.name, sector = EXCLUDED.sector, updated_at = now()`;
     if (c.holding) await sql`INSERT INTO holdings (symbol) VALUES (${c.symbol}) ON CONFLICT DO NOTHING`;
   }
-  const [{ count }] = await sql<{ count: number }[]>`SELECT count(*)::int AS count FROM alert_rules`;
-  if (count === 0) {
+  const [row] = await sql<{ count: number }[]>`SELECT count(*)::int AS count FROM alert_rules`;
+  if ((row?.count ?? 0) === 0) {
     for (const r of DEFAULT_ALERT_RULES) {
       await sql`INSERT INTO alert_rules (name, definition) VALUES (${r.name}, ${sql.json(r.definition)})`;
     }
