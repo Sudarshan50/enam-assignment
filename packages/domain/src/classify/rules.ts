@@ -34,6 +34,8 @@ interface Outcome {
   confidence: number;
   code: string;
   routine?: boolean;
+  /** Routine outcome whose text names material events only in passing; never promoted by text. */
+  incidental?: boolean;
 }
 
 interface SubjectRule {
@@ -47,6 +49,8 @@ interface SubjectRule {
 }
 
 const routine = (confidence = 0.9): Omit<Outcome, "code"> => ({ category: "unclassified", confidence, routine: true });
+/** Trading-window closures, newspaper copies and surveillance replies routinely cite results that were filed separately. */
+const incidental = (confidence = 0.9): Omit<Outcome, "code"> => ({ ...routine(confidence), incidental: true });
 const is = (category: Category, confidence: number): Omit<Outcome, "code"> => ({ category, confidence });
 
 // ---------- Text patterns (order matters: specific before broad) ----------
@@ -56,15 +60,19 @@ interface TextPattern {
   re: RegExp;
   category: Category;
   routine?: boolean;
+  incidental?: boolean;
 }
 
 const TRANSCRIPT_RE = /transcript|audio( and video| \/ video|\/video)? recording|recording of (the )?(earnings|conference|investor)/i;
 const M_AND_A_RE =
   /acqui(re|sition)|amalgamation|\bmerger\b|demerger|scheme of arrangement|joint venture|share purchase agreement|stake (sale|in)|transfer of (equity )?shares held|wholly[- ]owned subsidiary/i;
+const FINANCIAL_RESULTS_RE = /financial results?|quarterly results|un-?audited results|revised results|results for the (quarter|period|half|year)/i;
+/** Results actually approved or reported, not merely referenced ("closed until 48 hours after the financial results"). */
+const RESULTS_REPORTED_RE = new RegExp(`\\b(approved|adopted|took on record|reported|submitted)\\b[^.]{0,60}?(${FINANCIAL_RESULTS_RE.source})`, "i");
 
 const TEXT_PATTERNS: TextPattern[] = [
-  { code: "trading_window", re: /trading window/i, category: "unclassified", routine: true },
-  { code: "newspaper", re: /newspaper (publication|advertisement)|copy of (the )?newspaper/i, category: "unclassified", routine: true },
+  { code: "trading_window", re: /trading window/i, category: "unclassified", routine: true, incidental: true },
+  { code: "newspaper", re: /newspaper (publication|advertisement)|copy of (the )?newspaper/i, category: "unclassified", routine: true, incidental: true },
   {
     code: "share_certificates",
     re: /(loss|duplicate|issue) of (share )?certificate|dematerial[iz]|regulation 74 ?\(5\)|compliance certificate/i,
@@ -78,11 +86,7 @@ const TEXT_PATTERNS: TextPattern[] = [
   { code: "bonus", re: /\bbonus (issue|shares|equity)|issue of bonus/i, category: "bonus_split" },
   { code: "split", re: /sub-?division|stock split|split of (equity )?shares/i, category: "bonus_split" },
   { code: "buyback", re: /buy-?back/i, category: "fund_raise" },
-  {
-    code: "financial_results",
-    re: /financial results?|quarterly results|un-?audited results|revised results|results for the (quarter|period|half|year)/i,
-    category: "results",
-  },
+  { code: "financial_results", re: FINANCIAL_RESULTS_RE, category: "results" },
   { code: "credit_rating", re: /credit rating|rating (agency|action)|\b(CRISIL|ICRA|CARE|India Ratings|Infomerics|Acuite)\b/i, category: "credit_rating" },
   { code: "dividend", re: /\bdividend\b/i, category: "dividend" },
   { code: "insider", re: /regulation 7 ?\(2\)|regulation 29|regulation 10 ?\(5\)|substantial acquisition|insider trading\)? regulations?.*disclos/i, category: "insider_trading" },
@@ -111,10 +115,11 @@ const TEXT_PATTERNS: TextPattern[] = [
   { code: "press_release", re: /press release|media release/i, category: "press_release" },
 ];
 
-function matchText(source: string, confidence: number): Outcome | null {
+function matchText(source: string, confidence: number, materialOnly = false): Outcome | null {
   if (!source) return null;
   for (const p of TEXT_PATTERNS) {
-    if (p.re.test(source)) return { category: p.category, confidence, code: `text:${p.code}`, routine: p.routine };
+    if (materialOnly && p.routine) continue;
+    if (p.re.test(source)) return { category: p.category, confidence, code: `text:${p.code}`, routine: p.routine, incidental: p.incidental };
   }
   return null;
 }
@@ -126,12 +131,22 @@ function firstMatch(text: string, entries: [RegExp, Category, string][], confide
   return null;
 }
 
+const matchResults = (source: string, confidence: number) => firstMatch(source, [[FINANCIAL_RESULTS_RE, "results", "financial_results"]], confidence);
+
+/**
+ * A board outcome that mentions results is a results filing, whatever else (trading window, ESOP, bonus) it
+ * lists; otherwise any material agenda item beats routine ones.
+ */
+function refineBoardOutcome(text: string, summary: string): Outcome | null {
+  return matchResults(text, 0.9) ?? matchText(text, 0.9, true) ?? matchResults(summary, 0.8) ?? matchText(text, 0.9);
+}
+
 const SUBJECT_RULES: SubjectRule[] = [
-  // Noise buckets first, so text inside them can't promote them.
-  { match: /^trading window/i, code: "trading_window", outcome: routine(0.95) },
-  { match: /newspaper publication/i, code: "newspaper", outcome: routine(0.9) },
-  { match: /^price movement/i, code: "price_movement", outcome: routine(0.9) },
-  { match: /^spurt in volume/i, code: "volume_spurt", outcome: routine(0.9) },
+  // Noise buckets first. Text can only promote them to results (see classifyByRules), never for incidental ones.
+  { match: /^trading window/i, code: "trading_window", outcome: incidental(0.95) },
+  { match: /newspaper publication/i, code: "newspaper", outcome: incidental(0.9) },
+  { match: /^price movement/i, code: "price_movement", outcome: incidental(0.9) },
+  { match: /^spurt in volume/i, code: "volume_spurt", outcome: incidental(0.9) },
   { match: /^address change|change in registered office/i, code: "address_change", outcome: routine(0.9) },
   { match: /loss of share certificate|duplicate share certificate|certificate under sebi|reg\.? ?74/i, code: "certificates", outcome: routine(0.9) },
   { match: /^esop|^esos|^esps|options to purchase securities/i, code: "esop", outcome: routine(0.85) },
@@ -152,8 +167,7 @@ const SUBJECT_RULES: SubjectRule[] = [
   {
     match: /^outcome of board meeting/i,
     code: "board_outcome",
-    refine: (text, summary) =>
-      matchText(text, 0.9) ?? firstMatch(summary, [[/financial results/i, "results", "financial_results"]], 0.8),
+    refine: refineBoardOutcome,
     generic: true,
   },
 
@@ -258,9 +272,24 @@ const AUDITOR_RE = /resignation of (the )?statutory auditors?|statutory auditors
 const PENALTY_RE = /(penalty|fine) (of|amounting to|aggregating to) (rs\.?|inr|₹)|(imposed|levied) (a |monetary )?(penalty|fine)/i;
 const REGULATOR_RE = /\b(SEBI|Securities and Exchange Board|RBI|Reserve Bank|IRDAI|adjudicating officer|adjudication order|whole time member)\b/i;
 
+/** "no default in", "has not defaulted on", "no delay or default in", "without any default in": negation at most four words back in the clause. */
+const NEGATION_BEFORE_RE = /\b(no|nil|not|never|without|neither|nor)\b(\s+[\w/-]+){0,4}\s*$/i;
+/** "Default in payment of interest: Nil", as in Reg 57 / Reg 52(7) certificates. */
+const NIL_AFTER_RE = /^[^.;\n]{0,60}?[:–-]\s*(nil|none|not applicable|n\.?a\.?)\b/i;
+
+/** True when `re` matches somewhere that is not negated. */
+function testAffirmed(re: RegExp, source: string): boolean {
+  for (const m of source.matchAll(new RegExp(re.source, `${re.flags.replace("g", "")}g`))) {
+    const clause = source.slice(0, m.index).split(/[.;\n]/).pop() ?? "";
+    const after = source.slice(m.index + m[0].length);
+    if (!NEGATION_BEFORE_RE.test(clause) && !NIL_AFTER_RE.test(after)) return true;
+  }
+  return false;
+}
+
 const PINS: Pin[] = [
   { code: "insolvency", category: "litigation", test: (st, summary) => INSOLVENCY_RE.test(st) || INSOLVENCY_RE.test(summary) },
-  { code: "payment_default", category: "litigation", test: (st, summary) => DEFAULT_RE.test(st) || DEFAULT_RE.test(summary) },
+  { code: "payment_default", category: "litigation", test: (st, summary) => testAffirmed(DEFAULT_RE, st) || testAffirmed(DEFAULT_RE, summary) },
   { code: "fraud", category: "litigation", test: (st) => FRAUD_RE.test(st) },
   { code: "auditor_resignation", category: "management_change", test: (st) => AUDITOR_RE.test(st) },
   {
@@ -296,6 +325,10 @@ export function classifyByRules(input: RuleClassificationInput): RuleClassificat
   } else {
     if (subject) reasonCodes.push(`subject_unknown:${slug(subject)}`);
     outcome = matchText(`${subject}\n${text}`, 0.65) ?? matchText(summary, 0.5);
+  }
+  // Companies file results under whatever bucket is at hand (address change, ESOP, AOA amendment).
+  if (outcome?.routine && !outcome.incidental) {
+    outcome = firstMatch(`${text}\n${summary}`, [[RESULTS_REPORTED_RE, "results", "financial_results"]], 0.75) ?? outcome;
   }
 
   let category: Category = outcome?.category ?? "unclassified";

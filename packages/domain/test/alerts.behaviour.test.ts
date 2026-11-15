@@ -3,10 +3,13 @@ import type { AlertRuleDefinition } from "@finn/shared/contracts/alerts";
 import { CATEGORIES, type Category } from "@finn/shared/taxonomy";
 import {
   changePct,
+  corporateActionSuppression,
   createScopeResolver,
   evaluateCategoryRule,
   evaluatePriceRules,
+  extractRecordDate,
   type AnnouncementForAlert,
+  type CorporateActionForAlert,
   type PriceSnapshot,
   type RuleLike,
 } from "../src/alerts/evaluate";
@@ -145,6 +148,60 @@ describe("idempotency and rule hygiene", () => {
   it("suppressed symbols (bonus/split) produce no price or volume drafts", () => {
     const drafts = evaluatePriceRules(rules, snaps, inScope, { suppressedSymbols: new Set(["ZTDALPHA"]) });
     expect(drafts.map((d) => d.symbol)).toEqual(["ZTDBANK", "ZTDBANK"]);
+  });
+});
+
+describe("bonus/split suppression window", () => {
+  const action = (publishedAt: string, extra: Partial<CorporateActionForAlert> = {}): CorporateActionForAlert => ({
+    symbol: "ZTDALPHA",
+    publishedAt: new Date(`${publishedAt}T15:30:00+05:30`),
+    recordDate: null,
+    text: "Board approved a bonus issue of 1:1",
+    ...extra,
+  });
+  const suppressed = (actions: CorporateActionForAlert[], session: string) => corporateActionSuppression(actions, session).has("ZTDALPHA");
+
+  it("reads the record/ex-date from exchange text in the formats NSE filings use", () => {
+    expect(extractRecordDate("Steelcast Limited has informed the Exchange that Record date for the purpose of Dividend  is 20-Nov-2026.")).toBe("2026-11-20");
+    expect(extractRecordDate("The company has fixed 20.11.2026 as the record date for the second interim dividend.")).toBe("2026-11-20");
+    expect(extractRecordDate("The record date for this bonus issue is November 20, 2026. Allotment on November 23, 2026.")).toBe("2026-11-20");
+    expect(extractRecordDate("Ex-date: 4th December 2026")).toBe("2026-12-04");
+    expect(extractRecordDate("Record Date 2026-12-04 for sub-division")).toBe("2026-12-04");
+    expect(extractRecordDate("Board meeting held on 13/11/2026 approved a bonus issue; record date to be intimated later.")).toBeNull();
+    expect(extractRecordDate("Record date is 31-02-2026")).toBeNull();
+    expect(extractRecordDate("Bonus issue in the ratio 1:1")).toBeNull();
+  });
+
+  it("suppresses sessions in the week after the filing, as before", () => {
+    const a = [action("2026-11-10")];
+    expect(suppressed(a, "2026-11-09")).toBe(false);
+    expect(suppressed(a, "2026-11-10")).toBe(true);
+    expect(suppressed(a, "2026-11-17")).toBe(true);
+    expect(suppressed(a, "2026-11-18")).toBe(false);
+  });
+
+  it("suppresses the ex-date move of a bonus filed weeks earlier (record date from the card)", () => {
+    const a = [action("2026-10-20", { recordDate: "2026-12-04" })];
+    expect(suppressed(a, "2026-11-30")).toBe(false);
+    expect(suppressed(a, "2026-12-01")).toBe(true);
+    expect(suppressed(a, "2026-12-04")).toBe(true);
+    expect(suppressed(a, "2026-12-07")).toBe(true);
+    expect(suppressed(a, "2026-12-08")).toBe(false);
+  });
+
+  it("falls back to a record date stated in the text, and the card wins over the text", () => {
+    expect(suppressed([action("2026-10-20", { text: "Record date for the bonus issue is 04-Dec-2026" })], "2026-12-04")).toBe(true);
+    const both = [action("2026-10-20", { recordDate: "2026-12-18", text: "Record date for the bonus issue is 04-Dec-2026" })];
+    expect(suppressed(both, "2026-12-04")).toBe(false);
+    expect(suppressed(both, "2026-12-18")).toBe(true);
+  });
+
+  it("only suppresses the symbol that has the action", () => {
+    expect([...corporateActionSuppression([action("2026-11-10"), action("2026-10-01", { symbol: "ZTDBANK", recordDate: "2026-11-12" })], "2026-11-12")].sort()).toEqual([
+      "ZTDALPHA",
+      "ZTDBANK",
+    ]);
+    expect([...corporateActionSuppression([action("2026-11-10")], "2026-11-12")]).toEqual(["ZTDALPHA"]);
   });
 });
 

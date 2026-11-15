@@ -1,6 +1,6 @@
 import type { AlertRuleDefinition } from "@finn/shared/contracts/alerts";
 import { CATEGORY_LABELS, type Category, type StatementFamily } from "@finn/shared/taxonomy";
-import { formatPct } from "@finn/shared/format";
+import { formatPct, istDateString } from "@finn/shared/format";
 
 export type RuleScope = AlertRuleDefinition["scope"];
 export type AlertKind = AlertRuleDefinition["type"];
@@ -74,6 +74,85 @@ export function changePct(snapshot: Pick<PriceSnapshot, "close" | "prevClose">):
 export interface EvaluatePriceOptions {
   /** Symbols with a bonus/split in the window; their price and volume moves are mechanical, not news. */
   suppressedSymbols?: ReadonlySet<string>;
+}
+
+/** A bonus/split filing, as needed to decide which sessions its mechanical price move can land on. */
+export interface CorporateActionForAlert {
+  symbol: string;
+  publishedAt: Date;
+  /** YYYY-MM-DD from the enriched card, when known. */
+  recordDate: string | null;
+  /** Exchange text and summary; searched for a record/ex-date when the card has none. */
+  text: string;
+}
+
+export const CORPORATE_ACTION_SUPPRESSION = {
+  /** Sessions this many days after the filing (and the filing day itself). */
+  afterFilingDays: 7,
+  /** Sessions this many calendar days either side of the record/ex-date (T+1: ex-date is the record date; T+2 was a business day earlier). */
+  aroundExDateDays: 3,
+  /** Filings this far back can still have their record date on or after the session (bonus within 2 months of board approval). */
+  lookbackDays: 90,
+} as const;
+
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const MON = "(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?";
+const DATE_FORMATS: { re: RegExp; parse: (m: RegExpMatchArray) => [number, number, number] }[] = [
+  { re: /\b(\d{4})-(\d{2})-(\d{2})\b/g, parse: (m) => [Number(m[1]), Number(m[2]), Number(m[3])] },
+  { re: /\b(\d{1,2})[./-](\d{1,2})[./-](\d{4})\b/g, parse: (m) => [Number(m[3]), Number(m[2]), Number(m[1])] },
+  {
+    re: new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?[\\s/-]+${MON}[\\s/,-]+(\\d{4})\\b`, "gi"),
+    parse: (m) => [Number(m[3]), MONTHS.indexOf(m[2]!.toLowerCase()) + 1, Number(m[1])],
+  },
+  {
+    re: new RegExp(`\\b${MON}\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})\\b`, "gi"),
+    parse: (m) => [Number(m[3]), MONTHS.indexOf(m[1]!.toLowerCase()) + 1, Number(m[2])],
+  },
+];
+const RECORD_DATE_RE = /\b(record|ex)[- ]?date\b/gi;
+/** How far (characters) a date may sit from "record date" / "ex-date" and still belong to it. */
+const RECORD_DATE_REACH = 80;
+
+/** The record or ex-date stated in a corporate-action filing ("Record date ... is 20-Nov-2026", "fixed 20.11.2026 as the record date"). */
+export function extractRecordDate(text: string): string | null {
+  const dates: { at: number; end: number; iso: string }[] = [];
+  for (const { re, parse } of DATE_FORMATS) {
+    for (const m of text.matchAll(re)) {
+      const [y, mo, d] = parse(m);
+      const iso = `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const parsed = new Date(`${iso}T00:00:00Z`);
+      if (mo >= 1 && mo <= 12 && !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === iso) dates.push({ at: m.index, end: m.index + m[0].length, iso });
+    }
+  }
+  let best: { distance: number; iso: string } | null = null;
+  for (const k of text.matchAll(RECORD_DATE_RE)) {
+    for (const d of dates) {
+      const after = d.at >= k.index;
+      const between = after ? text.slice(k.index + k[0].length, d.at) : text.slice(d.end, k.index);
+      const distance = between.length;
+      if (distance > RECORD_DATE_REACH || /;|\.\s/.test(between)) continue;
+      if (!best || distance < best.distance) best = { distance, iso: d.iso };
+    }
+  }
+  return best?.iso ?? null;
+}
+
+const daysBetween = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+
+/**
+ * Symbols whose session move is mechanical: within a week of the bonus/split filing, or around its record/ex-date
+ * (which is often weeks after the filing).
+ */
+export function corporateActionSuppression(actions: readonly CorporateActionForAlert[], sessionDate: string): Set<string> {
+  const { afterFilingDays, aroundExDateDays } = CORPORATE_ACTION_SUPPRESSION;
+  const out = new Set<string>();
+  for (const a of actions) {
+    const sinceFiling = daysBetween(istDateString(a.publishedAt), sessionDate);
+    const exDate = a.recordDate ?? extractRecordDate(a.text);
+    const nearExDate = exDate !== null && Math.abs(daysBetween(exDate, sessionDate)) <= aroundExDateDays;
+    if ((sinceFiling >= 0 && sinceFiling <= afterFilingDays) || nearExDate) out.add(a.symbol);
+  }
+  return out;
 }
 
 export function evaluatePriceRules(

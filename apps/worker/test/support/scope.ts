@@ -84,8 +84,8 @@ export function scopeAnnouncements<M extends Mod<"announcementsRepo">>(mod: M): 
         listPending: async (opts: { limit?: number; maxAttempts?: number } = {}) =>
           (await r.listPending({ ...opts, limit: 100_000 })).filter((a) => mineSeq(a.seqId)).slice(0, opts.limit ?? 300),
         listResultsAwaitingXbrl: async (sinceDays?: number) => (await r.listResultsAwaitingXbrl(sinceDays)).filter((a) => mineSymbol(a.symbol)),
-        symbolsWithCategoryBetween: async (...args: Parameters<typeof r.symbolsWithCategoryBetween>) =>
-          (await r.symbolsWithCategoryBetween(...args)).filter(mineSymbol),
+        corporateActionsBetween: async (...args: Parameters<typeof r.corporateActionsBetween>) =>
+          (await r.corporateActionsBetween(...args)).filter((a) => mineSymbol(a.symbol)),
         saveClassification: async (...args: Parameters<typeof r.saveClassification>) => {
           if (scope.failSave.has(args[0])) throw new Error(`simulated database failure for ${args[0]}`);
           return r.saveClassification(...args);

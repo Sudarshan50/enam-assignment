@@ -65,12 +65,14 @@ export function filingsRepo(sql: Sql) {
     },
 
     /**
-     * Upserts facts on (filing, concept, context). Called only after a successful parse, so a malformed
-     * re-download never wipes earlier good facts.
+     * Replaces the filing's facts with this parse: upserts on (filing, concept, context) and, in the same
+     * transaction, deletes facts the parse no longer has (a revised XBRL that drops a line item). Called only
+     * after a successful parse, and a parse with no usable facts changes nothing, so a malformed re-download
+     * never wipes earlier good facts.
      */
     async upsertFacts(filingSeqId: string, facts: readonly FactUpsert[]): Promise<number> {
       const seen = new Set<string>();
-      const rows = [];
+      const rows: { filing_seq_id: string; concept: string; context: FactContext; period_start: string | null; period_end: string; value: string; unit: string; derived: boolean }[] = [];
       for (const f of facts) {
         const key = `${f.concept}|${f.context}`;
         if (seen.has(key) || !Number.isFinite(f.value)) continue;
@@ -86,14 +88,21 @@ export function filingsRepo(sql: Sql) {
           derived: f.derived,
         });
       }
-      for (let i = 0; i < rows.length; i += BATCH) {
-        const batch = rows.slice(i, i + BATCH);
-        await sql`
-          INSERT INTO financial_facts ${sql(batch, "filing_seq_id", "concept", "context", "period_start", "period_end", "value", "unit", "derived")}
-          ON CONFLICT (filing_seq_id, concept, context) DO UPDATE SET
-            value = EXCLUDED.value, unit = EXCLUDED.unit, period_start = EXCLUDED.period_start,
-            period_end = EXCLUDED.period_end, derived = EXCLUDED.derived`;
-      }
+      if (rows.length === 0) return 0;
+      await sql.begin(async (tx) => {
+        await tx`
+          DELETE FROM financial_facts
+          WHERE filing_seq_id = ${filingSeqId}
+            AND NOT (concept || '|' || context = ANY(${rows.map((r) => `${r.concept}|${r.context}`)}::text[]))`;
+        for (let i = 0; i < rows.length; i += BATCH) {
+          const batch = rows.slice(i, i + BATCH);
+          await tx`
+            INSERT INTO financial_facts ${tx(batch, "filing_seq_id", "concept", "context", "period_start", "period_end", "value", "unit", "derived")}
+            ON CONFLICT (filing_seq_id, concept, context) DO UPDATE SET
+              value = EXCLUDED.value, unit = EXCLUDED.unit, period_start = EXCLUDED.period_start,
+              period_end = EXCLUDED.period_end, derived = EXCLUDED.derived`;
+        }
+      });
       return rows.length;
     },
 

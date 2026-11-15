@@ -38,8 +38,8 @@ const EXPECTED: Record<string, Category> = {
   SAILIFE: "credit_rating",
   CMSINFO: "management_change",
   GPIL: "unclassified",
-  SWELECTES: "unclassified",
-  GSPCROP: "unclassified",
+  SWELECTES: "results", // ESOP bucket, but the summary is Q2 results
+  GSPCROP: "results", // Address Change bucket, but the summary is Q2 results
   TVSSCS: "management_change",
   ASTRON: "litigation",
   ARSHIYA: "results",
@@ -64,7 +64,7 @@ const EXPECTED: Record<string, Category> = {
   AHLEAST: "credit_rating",
   NIVABUPA: "unclassified",
   IZMO: "unclassified",
-  ZETWERK: "unclassified",
+  ZETWERK: "results", // AOA/MOA bucket, but the summary is Q2 results
   DEEDEV: "press_release",
   POONAWALLA: "fund_raise",
   VTL: "unclassified", // bare "Amendment(s)": left to the LLM

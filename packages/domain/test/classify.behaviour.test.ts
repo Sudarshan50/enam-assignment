@@ -100,6 +100,25 @@ describe("severity pins force act", () => {
     expect(needsLlmFallback(r)).toBe(false);
   });
 
+  it("payment default: a negated mention in a routine certificate does not pin", () => {
+    for (const text of [
+      "Certificate under Regulation 57: there was no default in payment of interest on NCDs",
+      "The company has not defaulted on repayment of principal",
+      "There has been no delay or default in payment of interest",
+      "Nil default in payment of interest/principal during the quarter",
+      "Interest was paid on the due date without any default in payment",
+      "Default in payment of interest/principal: Nil",
+    ]) {
+      const r = c("Updates", text);
+      expect(r.pinned, text).toBeNull();
+      expect(r.reasonCodes).not.toContain("pin:payment_default");
+    }
+    expect(c("Updates", "Intimation", "The company confirms that there has been no default in payment of interest.").pinned).toBeNull();
+    // A negation elsewhere in the sentence does not hide a real default.
+    pinned(c("Updates", "The company could not arrange funds and there is a default in payment of interest"), "payment_default");
+    pinned(c("Updates", "No other change. Intimation of default in payment of interest on NCDs"), "payment_default");
+  });
+
   it("a pin keeps a meaningful rule category (results stay results)", () => {
     const r = c("Reasons for Delayed/Non-submission of Financial Results", "Company is undergoing CIRP; results delayed");
     expect(r.category).toBe("results");
@@ -143,6 +162,35 @@ describe("routine buckets skip the LLM", () => {
     }
   });
 
+  it("results reported in the text or summary of a routine bucket promote it to results", () => {
+    const summary = "The Board approved unaudited financial results for the quarter ended September 30, 2026. Net profit was Rs 44 crore.";
+    for (const subject of ["Address Change", "ESOP/ESOS/ESPS", "Amendment to AOA/MOA", "Monitoring Agency Report", "Related Party Transactions"]) {
+      const r = c(subject, "Intimation", summary);
+      expect(r, subject).toMatchObject({ category: "results", reasonCodes: [expect.stringMatching(/^subject:/), "text:financial_results"] });
+      expect(r.reasonCodes).not.toContain(ROUTINE_REASON);
+      expect(needsLlmFallback(r)).toBe(false);
+    }
+    expect(c("Allotment of Securities", "Allotment under ESOS 2021 and the Board took on record the financial results").category).toBe("results");
+    expect(c("General Updates", "Grant of stock options", summary).category).toBe("results");
+  });
+
+  it("buckets that cite results in passing stay routine", () => {
+    const cases: [string, string, string][] = [
+      ["Trading Window", "Closure of trading window", "Trading window closed until 48 hours after the Board approved the financial results for the quarter."],
+      ["Copy of Newspaper Publication", "Newspaper publication of results", "The company reported unaudited financial results for the quarter ended September 30, 2026."],
+      ["Price movement", "Clarification", "The company submitted that it reported financial results for the quarter on 12 November."],
+      ["Spurt in Volume", "Clarification", "The volume may reflect the financial results approved by the Board."],
+      ["General Updates", "Intimation of trading window closure", "Closed till the Board approved the financial results."],
+    ];
+    for (const [subject, text, summary] of cases) {
+      const r = c(subject, text, summary);
+      expect(r.category, subject).toBe("unclassified");
+      expect(r.reasonCodes).toContain(ROUTINE_REASON);
+    }
+    // A results mention that is not a results filing (future tense) does not promote.
+    expect(c("Address Change", "Intimation", "The Board will meet on 20 November to consider and approve the financial results.").category).toBe("unclassified");
+  });
+
   it("allotment of securities: ESOP allotment is routine, anything else is a fund raise", () => {
     expect(c("Allotment of Securities", "Allotment of 10,000 shares under ESOS 2021").reasonCodes).toContain(ROUTINE_REASON);
     expect(c("Allotment of Securities", "Allotment of 5,00,000 equity shares on preferential basis")).toMatchObject({ category: "fund_raise", confidence: 0.7 });
@@ -160,6 +208,21 @@ describe("text refinements", () => {
       category: "results",
       confidence: 0.8,
     });
+    // Results win over incidental agenda items listed before them.
+    for (const text of [
+      "Trading window to reopen 48 hours after approval of the unaudited financial results for the quarter",
+      "Grant of ESOP options and approval of the financial results for the quarter ended 30-09-2026",
+      "Recommended issue of bonus shares 1:1 and approved the quarterly results",
+      "Approved buyback of equity shares and the un-audited financial results",
+    ]) {
+      expect(c("Outcome of Board Meeting", text), text).toMatchObject({ category: "results", confidence: 0.9 });
+    }
+    expect(c("Outcome of Board Meeting", "Closure of trading window; grant of ESOPs", "The board approved the financial results for Q2.")).toMatchObject({
+      category: "results",
+      confidence: 0.8,
+    });
+    expect(c("Outcome of Board Meeting", "Grant of stock options to employees").reasonCodes).toContain(ROUTINE_REASON);
+    expect(c("Outcome of Board Meeting", "Recommended issue of bonus shares in the ratio 1:1; trading window closed").category).toBe("bonus_split");
     // Nothing recognisable: unclassified, low confidence, LLM decides.
     const vague = c("Outcome of Board Meeting", "Outcome of the board meeting held today");
     expect(vague.category).toBe("unclassified");

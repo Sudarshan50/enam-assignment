@@ -295,6 +295,40 @@ describe.skipIf(!reachable)("repositories (ZTDB scope) against the local databas
     expect(counts.raw).toBeGreaterThanOrEqual(1);
   });
 
+  it("announcements: corporate actions in a window carry the card record date and the exchange text", async () => {
+    const repo = announcementsRepo(sql);
+    const filed = (seqId: string, symbol: string, publishedAt: string, bodyText: string | null) => ({
+      seqId,
+      symbol,
+      subject: "Bonus",
+      headline: `${seqId} bonus issue 1:1`,
+      bodyText,
+      pdfUrl: null,
+      publishedAt: new Date(publishedAt),
+      raw: {},
+    });
+    await repo.upsertRaw([
+      filed("ztdb-ca-card", S("BANK"), "2099-03-01T05:00:00Z", "Record date is 20-Mar-2099"),
+      filed("ztdb-ca-text", S("IND"), "2099-03-02T05:00:00Z", null),
+      filed("ztdb-ca-generic", S("HOLD"), "2099-03-03T05:00:00Z", null),
+      filed("ztdb-ca-late", S("BANK"), "2099-04-01T05:00:00Z", null),
+    ]);
+    const classify = (seqId: string, category: "bonus_split" | "dividend") =>
+      repo.saveClassification(seqId, { category, confidence: 0.95, source: "rule", reasonCodes: [], score: 40, tier: "know", clusterKey: seqId, oneLiner: null });
+    for (const seqId of ["ztdb-ca-card", "ztdb-ca-text", "ztdb-ca-late"]) await classify(seqId, "bonus_split");
+    await classify("ztdb-ca-generic", "dividend");
+    await repo.saveCard("ztdb-ca-card", { kind: "corporate_action", action: "bonus", amountPerShare: null, ratio: "1:1", recordDate: "2099-03-20", yieldPct: null });
+    await repo.saveCard("ztdb-ca-text", { kind: "generic", oneLiner: "Bonus" });
+
+    const rows = (await repo.corporateActionsBetween("bonus_split", new Date("2099-02-01T00:00:00Z"), new Date("2099-04-01T00:00:00Z")))
+      .filter((r) => r.symbol.startsWith(P))
+      .sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime());
+    expect(rows).toEqual([
+      { symbol: S("BANK"), publishedAt: new Date("2099-03-01T05:00:00Z"), recordDate: "2099-03-20", text: "ztdb-ca-card bonus issue 1:1\nRecord date is 20-Mar-2099" },
+      { symbol: S("IND"), publishedAt: new Date("2099-03-02T05:00:00Z"), recordDate: null, text: "ztdb-ca-text bonus issue 1:1" },
+    ]);
+  });
+
   it("prefs: weights merge and are sanitised, default window, interactions and dismiss counts (rolled back)", async () => {
     const shared = await prefsRepo(sql).get();
     await inRolledBackTx(async (tx) => {

@@ -234,6 +234,25 @@ describe.skipIf(!reachable)("repositories against the local database", () => {
     expect((await repo.latestParsed(SYMBOL))?.seqId).toBe(filing.seqId);
   });
 
+  it("filings: a revised parse that drops a line item removes the stale fact", async () => {
+    const repo = filingsRepo(sql);
+    const fact = (concept: string, context: "OneD" | "OneI", value: number) => ({ concept, context, periodStart: null, periodEnd: "2026-09-30", value, unit: "INR", derived: false });
+    const original = [fact("RevenueFromOperations", "OneD", 100), fact("ExceptionalItems", "OneD", 7), fact("ExceptionalItems", "OneI", 9)];
+    expect(await repo.upsertFacts("zz-test-filing", original)).toBe(3);
+    expect((await repo.getFacts("zz-test-filing")).map((f) => `${f.concept}|${f.context}`)).toEqual(["ExceptionalItems|OneD", "ExceptionalItems|OneI", "RevenueFromOperations|OneD"]);
+
+    const revised = [fact("RevenueFromOperations", "OneD", 101), fact("ExceptionalItems", "OneI", 9)];
+    expect(await repo.upsertFacts("zz-test-filing", revised)).toBe(2);
+    expect((await repo.getFacts("zz-test-filing")).map((f) => [f.concept, f.context, f.value])).toEqual([
+      ["ExceptionalItems", "OneI", 9],
+      ["RevenueFromOperations", "OneD", 101],
+    ]);
+
+    // A parse with no usable facts never wipes the stored ones.
+    expect(await repo.upsertFacts("zz-test-filing", [fact("RevenueFromOperations", "OneD", Number.NaN)])).toBe(0);
+    expect(await repo.countFacts("zz-test-filing")).toBe(2);
+  });
+
   it("prefs: category weights merge", async () => {
     const repo = prefsRepo(sql);
     const before = await repo.getCategoryWeights();

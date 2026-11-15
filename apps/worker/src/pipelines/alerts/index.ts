@@ -1,4 +1,6 @@
 import {
+  CORPORATE_ACTION_SUPPRESSION,
+  corporateActionSuppression,
   createScopeResolver,
   evaluateCategoryRule,
   evaluatePriceRules,
@@ -15,9 +17,6 @@ import { argIsoDate } from "../../args";
 import type { Command, WorkerContext } from "../../context";
 import { deliverPendingPushes, type DeliverySummary } from "../../notify/webPush";
 import { addDays, istDayStart } from "../../time";
-
-/** A bonus/split filed within this many days before the session (or that day) suppresses price alerts. */
-const SPLIT_SUPPRESSION_DAYS = 7;
 
 export interface AlertRunSummary {
   sessionDate: string | null;
@@ -66,13 +65,12 @@ export async function runPriceAlerts(ctx: WorkerContext, opts: { sessionDate?: s
     volume: r.volume,
     avg20Volume: r.avg20Volume,
   }));
-  const suppressed = new Set(
-    await announcementsRepo(ctx.sql).symbolsWithCategoryBetween(
-      "bonus_split",
-      istDayStart(addDays(sessionDate, -SPLIT_SUPPRESSION_DAYS)),
-      istDayStart(addDays(sessionDate, 1)),
-    ),
+  const actions = await announcementsRepo(ctx.sql).corporateActionsBetween(
+    "bonus_split",
+    istDayStart(addDays(sessionDate, -CORPORATE_ACTION_SUPPRESSION.lookbackDays)),
+    istDayStart(addDays(sessionDate, 1)),
   );
+  const suppressed = corporateActionSuppression(actions, sessionDate);
   const drafts = evaluatePriceRules(rules, snapshots, await scopeResolver(ctx.sql), { suppressedSymbols: suppressed });
   const created = await insertDrafts(ctx.sql, drafts);
   const push = opts.push === false ? null : await deliverPendingPushes(ctx);

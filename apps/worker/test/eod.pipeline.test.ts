@@ -149,8 +149,15 @@ describe.skipIf(sql === null)("EOD prices and price alerts against the local dat
     expect(await ztdeAlerts()).toHaveLength(3);
   });
 
-  it("--if-missing skips a session that already has bhavcopy rows", async () => {
-    expect(await runEod(ctx, { date: "2026-11-13", ifMissing: true })).toMatchObject({ status: "skipped_existing", rowsStored: 0 });
+  it("--if-missing skips the download but still evaluates alerts (a run that stored prices and died before alerting recovers)", async () => {
+    await sql`DELETE FROM alerts WHERE symbol LIKE ${`${P}%`} AND event_key = '2026-11-13'`;
+    const summary = await runEod(ctx, { date: "2026-11-13", ifMissing: true });
+    expect(summary).toMatchObject({ status: "skipped_existing", rowsStored: 0, alerts: { sessionDate: "2026-11-13", drafts: 3, created: 3 } });
+    expect(http.calls).toEqual([]);
+    expect(await ztdeAlerts()).toHaveLength(3);
+
+    expect((await runEod(ctx, { date: "2026-11-13", ifMissing: true })).alerts).toMatchObject({ drafts: 3, created: 0 });
+    expect((await runEod(ctx, { date: "2026-11-13", ifMissing: true, alerts: false })).alerts).toBeNull();
     expect(http.calls).toEqual([]);
   });
 
@@ -254,5 +261,26 @@ describe.skipIf(sql === null)("EOD prices and price alerts against the local dat
     await backfillPricesCommand.run(ctx, { _: [], days: "1" });
     expect(log.messages("info")).toContain("Price backfill finished");
     await expect(backfillPricesCommand.run(ctx, { _: [], days: "0" })).rejects.toThrow(/positive integer/);
+  });
+
+  it("a bonus filed weeks before its record date suppresses the ex-date session, not sessions outside the window", async () => {
+    const ann = announcementsRepo(sql);
+    const seqId = `${scope.seq}-bonus-record-date`;
+    await ann.upsertRaw([
+      { seqId, symbol: S("SPLIT"), subject: "Record Date", headline: "Record date for the purpose of Bonus issue is 04-Dec-2026", bodyText: null, pdfUrl: null, publishedAt: new Date("2026-11-02T10:00:00Z"), raw: {} },
+    ]);
+    await ann.saveClassification(seqId, { category: "bonus_split", confidence: 0.85, source: "rule", reasonCodes: [], score: 45, tier: "know", clusterKey: `${S("SPLIT")}:bonus_split:2026-11-02`, oneLiner: null });
+    const halved = (symbol: string, sessionDate: string) => ({ symbol, sessionDate, open: 50, high: 50, low: 50, close: 50, prevClose: 100, volume: 100, source: "bhavcopy" as const });
+    for (const d of ["2026-12-04", "2026-12-10"]) await pricesRepo(sql).upsertMany([halved(S("SPLIT"), d), halved(S("DOWN5"), d)]);
+
+    const onExDate = await runPriceAlerts(ctx, { sessionDate: "2026-12-04", push: false });
+    expect(onExDate).toMatchObject({ drafts: 1, created: 1 });
+    const weekLater = await runPriceAlerts(ctx, { sessionDate: "2026-12-10", push: false });
+    expect(weekLater).toMatchObject({ drafts: 2, created: 2 });
+    expect((await ztdeAlerts()).filter((a) => a.event_key >= "2026-12-01").map((a) => `${a.symbol}:${a.event_key}`)).toEqual([
+      `${S("DOWN5")}:2026-12-04`,
+      `${S("DOWN5")}:2026-12-10`,
+      `${S("SPLIT")}:2026-12-10`,
+    ]);
   });
 });

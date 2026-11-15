@@ -59,6 +59,15 @@ export interface ClusterMemberRow {
   publishedAt: Date;
 }
 
+export interface CorporateActionRow {
+  symbol: string;
+  publishedAt: Date;
+  /** From a corporate_action card, when enrichment extracted one. */
+  recordDate: string | null;
+  /** Exchange text and summary. */
+  text: string;
+}
+
 const json = (sql: Sql, value: unknown) => sql.json(value as postgres.JSONValue);
 
 export function announcementsRepo(sql: Sql) {
@@ -184,12 +193,14 @@ export function announcementsRepo(sql: Sql) {
           AND (card IS NULL OR card->>'status' = 'not_filed_yet')`;
     },
 
-    /** Symbols with a bonus/split filing in the window; price alerts for them are suppressed. */
-    async symbolsWithCategoryBetween(category: Category, from: Date, to: Date): Promise<string[]> {
-      const rows = await sql<{ symbol: string }[]>`
-        SELECT DISTINCT symbol FROM announcements
+    /** Filings of a category (bonus/split) published in the window, with whatever dates they carry; drives price-alert suppression. */
+    async corporateActionsBetween(category: Category, from: Date, to: Date): Promise<CorporateActionRow[]> {
+      return sql<CorporateActionRow[]>`
+        SELECT symbol, published_at AS "publishedAt",
+               CASE WHEN card->>'kind' = 'corporate_action' THEN card->>'recordDate' END AS "recordDate",
+               concat_ws(E'\n', headline, body_text) AS text
+        FROM announcements
         WHERE category = ${category} AND published_at >= ${from} AND published_at < ${to}`;
-      return rows.map((r) => r.symbol);
     },
 
     /** Ready cluster heads in a window: the digest's read model. */

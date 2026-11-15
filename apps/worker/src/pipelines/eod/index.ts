@@ -84,8 +84,11 @@ export async function runEod(
   const universe = await universeFor(ctx, Boolean(opts.all));
   const summary: EodSummary = { sessionDate, status: "stored", source: null, rowsStored: 0, universe: universe.size, alerts: null };
 
+  // Skips the download only: a run that stored prices may have died before avg20 or alerts, and both are idempotent.
   if (opts.ifMissing && (await prices.countForSession(sessionDate, "bhavcopy")) > 0) {
     summary.status = "skipped_existing";
+    await prices.recomputeAvg20({ from: addDays(sessionDate, -40) });
+    if (opts.alerts !== false) summary.alerts = await runPriceAlerts(ctx, { sessionDate });
     return summary;
   }
 
