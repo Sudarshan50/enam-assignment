@@ -119,10 +119,10 @@ describe.skipIf(!reachable)("research modules against the local database (synthe
         ],
         bear: [
           claim(req.user, "Receivable", "Receivable days rose to 45 from 38.", "Receivable days increased to 45 days from 38 days"),
-          claim(req.user, "resin", "PVC resin prices fell 40%.", "Key risks include volatile PVC resin prices"),
+          claim(req.user, "volatile PVC resin", "PVC resin prices fell 40%.", "Key risks include volatile PVC resin prices"),
         ],
       }),
-      "bull_bear.regenerate": (req) => ({ claims: [claim(req.user, "resin", "Resin prices are volatile.", "Key risks include volatile PVC resin prices")] }),
+      "bull_bear.regenerate": (req) => ({ claims: [claim(req.user, "volatile PVC resin", "Resin prices are volatile.", "Key risks include volatile PVC resin prices")] }),
     };
 
     it("returns a schema-valid payload whose claims are grounded, with one regeneration for the bad bear point", async () => {
