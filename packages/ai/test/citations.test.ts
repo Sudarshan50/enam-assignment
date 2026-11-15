@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { extractNumbers, numberSupported } from "../src/citations/numbers";
-import { checkClaim, normaliseForMatch, quoteInText, validateClaims, type SourceChunk } from "../src/citations/validator";
+import { checkClaim, mergeCitations, normaliseForMatch, quoteInText, validateClaims, type SourceChunk } from "../src/citations/validator";
 import { createClaimRegenerator } from "../src/prompts/regenerate";
 import { buildSourcesBlock } from "../src/prompts/sources";
 import type { LlmPort, StructuredCompletionRequest } from "@finn/shared/ports";
@@ -159,6 +159,41 @@ describe("validateClaims with regeneration", () => {
       throw new Error("LLM down");
     });
     expect(out[0]!.grounded).toBe(false);
+  });
+});
+
+describe("citation grouping", () => {
+  it("collapses repeated quotes from the same chunk and page into one verifiable citation", async () => {
+    const [claim] = await validateClaims(
+      [
+        {
+          text: "Order book was 1.2 lakh crore and capex 450 Cr.",
+          citations: [
+            { chunkId: "c-2", quote: "Total order book stood at Rs. 1.2 lakh crore" },
+            { chunkId: "c-2", quote: "Capex for the year was 450 Cr." },
+            { chunkId: "c-2", quote: "order book stood at Rs. 1.2 lakh" },
+          ],
+        },
+      ],
+      ctx,
+    );
+    expect(claim!.grounded).toBe(true);
+    expect(claim!.citations).toHaveLength(1);
+    expect(claim!.citations[0]!.quote).toBe("Total order book stood at Rs. 1.2 lakh crore … Capex for the year was 450 Cr.");
+    expect(quoteInText(claim!.citations[0]!.quote, chunkB.text)).toBe(true);
+  });
+
+  it("keeps citations from different pages of one chunk separate and prefers the longer overlapping quote", () => {
+    const base = { chunkId: "c-1", documentId: "d-1", documentLabel: "Q2 FY27 concall", url: null };
+    const out = mergeCitations([
+      { ...base, page: 3, quote: "revenue for the quarter" },
+      { ...base, page: 3, quote: "Our revenue for the quarter stood at" },
+      { ...base, page: 4, quote: "mid-teens growth" },
+    ]);
+    expect(out.map((c) => [c.page, c.quote])).toEqual([
+      [3, "Our revenue for the quarter stood at"],
+      [4, "mid-teens growth"],
+    ]);
   });
 });
 

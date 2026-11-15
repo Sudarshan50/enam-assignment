@@ -118,8 +118,26 @@ export function checkClaim(claim: RawClaim, ctx: ValidationContext): ClaimCheck 
   return { claim, ok: problems.length === 0, problems, citations };
 }
 
+/** One citation per chunk and page; distinct quotes from it are joined with an ellipsis, which quoteInText still verifies. */
+export function mergeCitations(citations: readonly Citation[]): Citation[] {
+  const merged = new Map<string, Citation>();
+  for (const c of citations) {
+    const key = `${c.chunkId}\u0000${c.page ?? ""}`;
+    const prev = merged.get(key);
+    if (!prev) {
+      merged.set(key, { ...c });
+      continue;
+    }
+    const a = normaliseForMatch(prev.quote);
+    const b = normaliseForMatch(c.quote);
+    if (a.includes(b)) continue;
+    prev.quote = b.includes(a) ? c.quote : `${prev.quote} … ${c.quote}`;
+  }
+  return [...merged.values()];
+}
+
 function toClaim(check: ClaimCheck): Claim {
-  return { text: check.claim.text.trim(), citations: check.citations, grounded: check.ok };
+  return { text: check.claim.text.trim(), citations: mergeCitations(check.citations), grounded: check.ok };
 }
 
 /**
