@@ -51,11 +51,13 @@ function moduleOf(run: ResearchRun | null, key: ModuleKey) {
 }
 
 export function ResearchScreen({ symbol }: { symbol: string }) {
-  const { run, events, transport, starting, error, rebuild, cached } = useResearch(symbol);
+  const { run, events, transport, starting, fetchingDocs, error, rebuild, cached } = useResearch(symbol);
   const recent = useStoredList("finn:recent-tickers");
   const terminal = isTerminalStatus(run?.status);
   const name = run?.companyName ?? symbol;
   const stalled = Boolean(error) && !run && !starting;
+  const docs = fetchingDocs && run && !isTerminalStatus(run.status) ? run.documents : [];
+  const reading = fetchingDocs ? { read: docs.filter((d) => d.status === "ready").length, total: docs.length } : null;
 
   useEffect(() => {
     recent.push(symbol);
@@ -203,7 +205,7 @@ export function ResearchScreen({ symbol }: { symbol: string }) {
           {(data) => <BullBearView data={data} />}
         </ModuleFrame>
 
-        <AskThread symbol={symbol} companyName={name} />
+        <AskThread symbol={symbol} companyName={name} reading={reading} />
       </div>
     </PageColumns>
   );

@@ -84,11 +84,17 @@ export function useResearch(symbol: string) {
     };
   }, [runId, refreshRun]);
 
+  const current = run.data;
+  // True from the moment a run is requested (including a rebuild over a finished run) until its documents are in.
+  const fetchingDocs =
+    starting || (runId !== null && (current === undefined ? !run.error : current.status === "queued" || current.status === "processing_docs"));
+
   return {
     run: run.data ?? null,
     events,
     transport,
     cached,
+    fetchingDocs,
     starting: starting || (existing.isLoading && !existing.data),
     error: startError ?? (runId ? run.error : existing.error) ?? null,
     rebuild: start,
