@@ -39,4 +39,4 @@ One Astral filing that screener lists as a concall is an audio-recording notice,
 
 https://github.com/Sudarshan50/enam-assignment
 
-Architecture, the local run, the EC2 runbook and the scoring rules are in `README.md`. `git log` is the build history.
+Architecture, the local run, the EC2 runbook and the scoring rules are in `README.md`. `git log` is the code history. The AI build history (the Cursor agent sessions and their subagents, with secrets redacted) is attached to the submission email.
