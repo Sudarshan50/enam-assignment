@@ -25,8 +25,6 @@ setScope("ZTDE");
 const P = scope.symbol;
 const S = (name: string) => `${P}${name}`;
 
-// ---------- Bhavcopy built from the real 13-Nov-2026 fixture ----------
-
 const fixtureCsv = strFromU8(Object.values(unzipSync(readSourcesFixtureBytes("bhavcopy_20261113.csv.zip")))[0]!);
 const [header, ...body] = fixtureCsv.split(/\r?\n/).filter(Boolean);
 const COL = Object.fromEntries(header!.split(",").map((name, i) => [name, i])) as Record<string, number>;

@@ -2,7 +2,6 @@
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- ---------- Identity ----------
 CREATE TABLE companies (
   symbol            text PRIMARY KEY,
   name              text NOT NULL,
@@ -23,7 +22,6 @@ CREATE TABLE holdings (
   added_at  timestamptz NOT NULL DEFAULT now()
 );
 
--- ---------- Ingestion bookkeeping ----------
 CREATE TABLE source_health (
   source                text PRIMARY KEY,
   last_success_at       timestamptz,
@@ -39,7 +37,6 @@ CREATE TABLE ingestion_watermarks (
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
 
--- ---------- Announcements (push) ----------
 CREATE TABLE announcements (
   seq_id        text PRIMARY KEY,
   symbol        text NOT NULL REFERENCES companies(symbol) ON DELETE CASCADE,
@@ -115,7 +112,6 @@ CREATE TABLE history_financials (
   PRIMARY KEY (symbol, statement, basis)
 );
 
--- ---------- Prices ----------
 CREATE TABLE prices_eod (
   symbol        text NOT NULL,
   session_date  date NOT NULL,
@@ -130,7 +126,6 @@ CREATE TABLE prices_eod (
   PRIMARY KEY (symbol, session_date)
 );
 
--- ---------- Documents and retrieval (pull) ----------
 CREATE TABLE documents (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   symbol          text NOT NULL REFERENCES companies(symbol) ON DELETE CASCADE,
@@ -212,7 +207,6 @@ CREATE TABLE guidance_checks (
   checked_at     timestamptz NOT NULL DEFAULT now()
 );
 
--- ---------- Research runs ----------
 CREATE TABLE research_runs (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   symbol        text NOT NULL,
@@ -259,7 +253,6 @@ CREATE TABLE module_cache (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
--- ---------- Alerts and push ----------
 CREATE TABLE alert_rules (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name        text NOT NULL,
@@ -302,7 +295,6 @@ CREATE TABLE notification_deliveries (
   PRIMARY KEY (alert_id, endpoint)
 );
 
--- ---------- Preferences and interactions ----------
 CREATE TABLE user_prefs (
   id                int PRIMARY KEY DEFAULT 1 CHECK (id = 1),
   category_weights  jsonb NOT NULL DEFAULT '{}',
@@ -319,7 +311,6 @@ CREATE TABLE interactions (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
--- ---------- AI cost ledger and cache ----------
 CREATE TABLE llm_calls (
   id                 bigserial PRIMARY KEY,
   provider           text NOT NULL,

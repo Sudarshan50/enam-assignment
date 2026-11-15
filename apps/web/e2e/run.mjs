@@ -27,9 +27,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 mkdirSync(OUT, { recursive: true });
 for (const f of readdirSync(OUT)) if (f.startsWith("FAIL-")) rmSync(join(OUT, f));
 
-// ---------------------------------------------------------------------------------------------
-// Chrome + CDP plumbing
-// ---------------------------------------------------------------------------------------------
 const profile = mkdtempSync(join(tmpdir(), "finn-e2e-"));
 const chrome = spawn(
   CHROME,
@@ -84,9 +81,6 @@ async function connect() {
   });
 }
 
-// ---------------------------------------------------------------------------------------------
-// Network + console capture
-// ---------------------------------------------------------------------------------------------
 let phase = "setup";
 const requests = new Map(); // requestId -> { url, method, status, mime, phase, sse: [] }
 const consoleErrors = [];
@@ -186,7 +180,6 @@ async function pressEscape() {
   for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
 }
 
-// In-page helpers -----------------------------------------------------------------------------
 function overflowReport() {
   const vw = window.innerWidth;
   const extra = document.documentElement.scrollWidth - vw;
@@ -216,9 +209,6 @@ function setValue(selector, value) {
   return true;
 }
 
-// ---------------------------------------------------------------------------------------------
-// Steps
-// ---------------------------------------------------------------------------------------------
 const results = [];
 const shots = [];
 const notes = [];

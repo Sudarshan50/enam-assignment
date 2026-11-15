@@ -131,7 +131,6 @@ export async function runIngest(ctx: WorkerContext, opts: IngestOptions = {}): P
   }
   summary.processed = processed.length;
 
-  // 3. Cluster: recompute heads for every cluster touched in this run.
   const touched = new Set<string>();
   for (const p of processed) {
     touched.add(p.clusterKey);
@@ -143,7 +142,6 @@ export async function runIngest(ctx: WorkerContext, opts: IngestOptions = {}): P
   }
   summary.clusters = touched.size;
 
-  // 4. Results: new results filings plus clusters still waiting for XBRL.
   const targets = new Map<string, { symbol: string; periodEnd: string }>();
   for (const p of processed) if (p.category === "results" && p.periodEnd) targets.set(p.clusterKey, { symbol: p.symbol, periodEnd: p.periodEnd });
   for (const r of await announcements.listResultsAwaitingXbrl()) {

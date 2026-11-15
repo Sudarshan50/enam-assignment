@@ -40,7 +40,6 @@ describe("parseRuleText: table-driven", () => {
     ["AGM dates", { type: "category", scope: { kind: "portfolio" }, categories: ["agm_egm"] }],
     ["press release", { type: "category", scope: { kind: "portfolio" }, categories: ["press_release"] }],
     ["analyst meet", { type: "category", scope: { kind: "portfolio" }, categories: ["investor_meetings"] }],
-    // Garbage and unsupported phrasing.
     ["", null],
     ["    ", null],
     ["hello there", null],

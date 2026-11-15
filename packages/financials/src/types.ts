@@ -26,7 +26,6 @@ export interface ParsedFiling {
   ytdStart: string | null;
   currency: string;
   facts: XbrlFact[];
-  /** Facts by context then concept, for quick lookup. */
   byContext: Record<XbrlContext, Record<string, number>>;
   /** SEBI taxonomy, e.g. "IntegratedFinance_IndAS/2026-01-31". */
   taxonomy?: string;

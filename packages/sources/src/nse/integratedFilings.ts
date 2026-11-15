@@ -108,7 +108,6 @@ export function selectFilingsForCard(
   };
 }
 
-/** Most recent quarter end present in the list, or null. */
 export function latestPeriodEnd(refs: IntegratedFilingRef[]): string | null {
   return refs.reduce<string | null>((max, r) => (max === null || r.periodEnd > max ? r.periodEnd : max), null);
 }

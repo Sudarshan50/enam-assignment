@@ -22,7 +22,6 @@ export const LLM_FALLBACK_CONFIDENCE = 0.6;
 /** Reason code marking a known low-value bucket; such rows skip the LLM even though they are `unclassified`. */
 export const ROUTINE_REASON = "routine";
 
-/** True when the rule result is too weak to stand on its own. */
 export function needsLlmFallback(result: RuleClassification): boolean {
   if (result.confidence < LLM_FALLBACK_CONFIDENCE) return true;
   return result.category === "unclassified" && !result.reasonCodes.includes(ROUTINE_REASON);
@@ -40,7 +39,6 @@ interface Outcome {
 interface SubjectRule {
   match: RegExp;
   code: string;
-  /** Fixed outcome for the bucket. */
   outcome?: Omit<Outcome, "code">;
   /** Bucket-specific text refinements tried before `outcome`. */
   refine?: Refine;
@@ -128,8 +126,6 @@ function firstMatch(text: string, entries: [RegExp, Category, string][], confide
   return null;
 }
 
-// ---------- Subject buckets ----------
-
 const SUBJECT_RULES: SubjectRule[] = [
   // Noise buckets first, so text inside them can't promote them.
   { match: /^trading window/i, code: "trading_window", outcome: routine(0.95) },
@@ -145,13 +141,11 @@ const SUBJECT_RULES: SubjectRule[] = [
   { match: /^redemption/i, code: "redemption", outcome: routine(0.8) },
   { match: /^amendment to (aoa|moa)/i, code: "aoa_moa", outcome: routine(0.75) },
 
-  // Severity buckets.
   { match: /corporate insolvency|insolvency and bankruptcy|\bCIRP\b/i, code: "insolvency", outcome: is("litigation", 0.95) },
   { match: /^fraud|default by (promoter|kmp|unlisted)/i, code: "fraud_default", outcome: is("litigation", 0.95) },
   { match: /default (in|on) payment|delay in (payment|servicing)/i, code: "payment_default", outcome: is("litigation", 0.95) },
   { match: /resignation of statutory auditor/i, code: "auditor_resignation", outcome: is("management_change", 0.95) },
 
-  // Results.
   { match: /^integrated filing.*financial/i, code: "integrated_filing", outcome: is("results", 0.95) },
   { match: /^financial results?|^financial result updates/i, code: "financial_results", outcome: is("results", 0.95) },
   { match: /delayed\/non-submission of financial results|non-submission of financial results/i, code: "results_delayed", outcome: is("results", 0.75) },
@@ -163,7 +157,6 @@ const SUBJECT_RULES: SubjectRule[] = [
     generic: true,
   },
 
-  // Calls and meetings.
   {
     match: /analysts\/institutional investor meet|con\. ?call/i,
     code: "investor_meet",
@@ -180,12 +173,10 @@ const SUBJECT_RULES: SubjectRule[] = [
   { match: /postal ballot/i, code: "postal_ballot", outcome: is("postal_ballot", 0.9) },
   { match: /\bAGM\b|\bEGM\b|annual general meeting|general meeting/i, code: "agm_egm", outcome: is("agm_egm", 0.85) },
 
-  // Management.
   { match: /^change in (director|management|company secretary|key managerial)/i, code: "management", outcome: is("management_change", 0.9) },
   { match: /^appointment|^resignation|^cessation|^retirement|^demise|^re-?appointment/i, code: "management", outcome: is("management_change", 0.9) },
   { match: /^change in auditors/i, code: "auditor_change", outcome: is("management_change", 0.65) },
 
-  // Deals and capital.
   { match: /^acquisition|^amalgamation|^merger|^demerger|^scheme of arrangement|open offer|^sale or disposal|^divestment/i, code: "m_and_a", outcome: is("m_and_a", 0.9) },
   {
     match: /takeover regulations|SEBI \(SAST\)|substantial acquisition/i,
@@ -227,7 +218,6 @@ const SUBJECT_RULES: SubjectRule[] = [
   { match: /^monthly business updates/i, code: "business_update", outcome: is("press_release", 0.75) },
   { match: /^press release/i, code: "press_release", refine: (text) => promoteFromPressRelease(text), outcome: is("press_release", 0.8) },
 
-  // Litigation and regulatory.
   { match: /^pendency of litigation|litigation/i, code: "litigation", outcome: is("litigation", 0.9) },
   { match: /^action\(s\) taken or orders passed/i, code: "regulatory_action", outcome: is("litigation", 0.8) },
   {
@@ -254,8 +244,6 @@ function promoteFromPressRelease(text: string): Outcome | null {
   if (!m || m.category === "press_release" || m.routine) return null;
   return m.category === "results" || m.category === "m_and_a" || m.category === "fund_raise" || m.category === "credit_rating" ? m : null;
 }
-
-// ---------- Severity pins ----------
 
 interface Pin {
   code: string;
@@ -284,8 +272,6 @@ const PINS: Pin[] = [
     },
   },
 ];
-
-// ---------- Entry point ----------
 
 const slug = (s: string) =>
   s

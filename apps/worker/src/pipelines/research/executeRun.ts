@@ -52,7 +52,6 @@ export async function executeResearchRun(ctx: WorkerContext, run: ResearchRunRow
     if (!companyName) throw new Error(`Unknown symbol ${symbol}: not in the companies master list`);
     await repo.addEvent(run.id, "run.started", `Researching ${companyName}`, { symbol, workerId: opts.workerId });
 
-    // 1. Documents
     const discovery = await discoverDocuments(ctx, symbol);
     for (const d of discovery.documents) {
       await repo.addEvent(run.id, "document.discovered", `Found ${documentLabel(d)}`, { documentId: d.id, label: documentLabel(d), url: d.url, docType: d.doc_type });
@@ -84,7 +83,6 @@ export async function executeResearchRun(ctx: WorkerContext, run: ResearchRunRow
     });
     summary.documents = results;
 
-    // 2. Modules
     await repo.setStatus(run.id, "synthesizing");
     const ready = await docsRepo.listReady(symbol, ["annual_report", "transcript"]);
     const documents: ModuleDocument[] = ready.map((d) => ({

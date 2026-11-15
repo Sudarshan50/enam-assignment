@@ -26,7 +26,6 @@ describe("every NSE subject in the 13-Nov-2026 snapshot", () => {
       expect(CATEGORIES).toContain(r.category);
       expect(r.confidence).toBeGreaterThan(0);
       expect(r.confidence).toBeLessThanOrEqual(1);
-      // A routine bucket never claims a real category.
       if (r.reasonCodes.includes(ROUTINE_REASON)) expect(r.category).toBe("unclassified");
     }
   });

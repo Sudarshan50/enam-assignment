@@ -101,7 +101,6 @@ export function pricesRepo(sql: Sql) {
       return sql<PriceRow[]>`SELECT ${columns()} FROM prices_eod WHERE session_date = ${sessionDate} ORDER BY symbol`;
     },
 
-    /** Most recent row per symbol (optionally restricted). */
     async latestPerSymbol(symbols?: readonly string[]): Promise<PriceRow[]> {
       return sql<PriceRow[]>`
         SELECT DISTINCT ON (symbol) ${columns()} FROM prices_eod

@@ -53,8 +53,6 @@ export async function wipeDemoData(sql: Sql): Promise<void> {
   });
 }
 
-// ---------- prices ----------
-
 const BASE: Record<string, { price: number; volume: number }> = {
   RELIANCE: { price: 1450, volume: 9e6 },
   HDFCBANK: { price: 990, volume: 14e6 },
@@ -152,8 +150,6 @@ export function buildPrices(symbol: string, sessions: string[]): PriceRow[] {
   });
   return rows;
 }
-
-// ---------- cards ----------
 
 function resultsMetric(key: string, label: string, cur: number, prev: number, yearAgo: number, ref: string, derived = false): ResultsMetric {
   const n = (crore: number, r: string) => ({ value: crore * CRORE, unit: "inr" as const, derived, source: { kind: "xbrl" as const, ref: r } });
@@ -409,8 +405,6 @@ function demoAnnouncements(): DemoAnnouncement[] {
   ];
 }
 
-// ---------- research (CDSL) ----------
-
 const CDSL_CHUNKS = [
   {
     page: 4,
@@ -523,7 +517,6 @@ export async function seedDemoData(sql: Sql, now = new Date()): Promise<{ announ
                 ${mover.session_date})`;
     }
 
-    // CDSL research run with a demo transcript, chunks, guidance and four finished modules.
     const created = new Date(now.getTime() - HOUR);
     const [doc] = await tx<{ id: string }[]>`
       INSERT INTO documents (symbol, doc_type, period_label, period_end, url, pages, text_quality, status)

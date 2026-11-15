@@ -76,7 +76,6 @@ export function timeAgo(iso: string, now: Date = new Date()): string {
   return istDateShort(iso);
 }
 
-/** Classifier provenance (which rule or field matched); the category kicker already says what it is. */
 const SMALL = ["Nothing", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
 export function numberWord(n: number): string {
   return SMALL[n] ?? String(n);
