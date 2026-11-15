@@ -9,7 +9,9 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "check-mocks": "tsx scripts/check-mocks.ts"
+    "check-mocks": "tsx scripts/check-mocks.ts",
+    "test": "vitest run --config vitest.config.ts",
+    "e2e": "node --env-file-if-exists=../../.env e2e/run.mjs"
   },
   "dependencies": {
     "@finn/shared": "*",
