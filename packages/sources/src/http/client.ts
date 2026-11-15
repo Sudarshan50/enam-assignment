@@ -49,6 +49,8 @@ export interface HttpClient {
   isAllowed(url: string): boolean;
 }
 
+const MAX_REDIRECTS = 5;
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
@@ -72,14 +74,27 @@ export function createHttpClient(options: HttpClientOptions = {}): HttpClient {
     return allowed.has(host) || suffixes.some((s) => host === s || host.endsWith(`.${s}`));
   }
 
+  /** Redirects are followed by hand so that a hop outside the allowlist is never requested. */
+  async function fetchAllowed(url: string, init: RequestInit): Promise<Response> {
+    let current = url;
+    for (let hop = 0; ; hop++) {
+      const res = await fetchImpl(current, { ...init, redirect: "manual" });
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+      if (!location) return res;
+      await res.body?.cancel();
+      if (hop >= MAX_REDIRECTS) throw new HttpError(`Too many redirects for ${url}`, url, res.status);
+      current = new URL(location, current).toString();
+      if (!isAllowed(current)) throw new HostNotAllowedError(current);
+    }
+  }
+
   async function request(url: string, accept: string, headers: Record<string, string> = {}): Promise<Response> {
     if (!isAllowed(url)) throw new HostNotAllowedError(url);
     let lastError: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        const res = await fetchImpl(url, {
+        const res = await fetchAllowed(url, {
           headers: { "User-Agent": ua, Accept: accept, "Accept-Language": "en-US,en;q=0.9", ...headers },
-          redirect: "follow",
           signal: AbortSignal.timeout(timeoutMs),
         });
         if (res.url && !isAllowed(res.url)) throw new HostNotAllowedError(res.url);
