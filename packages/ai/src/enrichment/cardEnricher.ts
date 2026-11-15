@@ -37,7 +37,7 @@ function sourceText(input: EnrichmentInput): string {
 
 function asNumber(value: number): ExtractedNumber {
   const decimals = String(value).split(".")[1]?.length ?? 0;
-  return { raw: String(value), value: Math.abs(value), decimals, dimension: "plain", rupees: null };
+  return { raw: String(value), value: Math.abs(value), decimals, dimension: "plain", rupees: null, negative: value < 0 };
 }
 
 /** Numbers are kept only if the filing text contains them (within 1%, rounding-aware). */

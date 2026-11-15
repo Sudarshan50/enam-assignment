@@ -1,5 +1,6 @@
 import type { GuidanceItemInput } from "@finn/db/repositories/guidance";
 import type { LlmPort } from "@finn/shared/ports";
+import { extractNumbers, numberSupported, type ExtractedNumber, type NumberDimension } from "../citations/numbers";
 import { quoteInText, type SourceChunk } from "../citations/validator";
 import * as prompt from "../prompts/guidance";
 import { buildSourcesBlock } from "../prompts/sources";
@@ -42,9 +43,36 @@ function encodeBounds(bound: "point" | "range" | "at_least" | "at_most", low: nu
   }
 }
 
+const UNIT_DIMENSION: Record<GuidanceItemInput["unit"], NumberDimension> = { pct: "pct", inr_crore: "money", x: "multiple" };
+
+/** Values the extraction prompt tells the model to read from words. */
+const WORD_VALUES: [RegExp, number][] = [
+  [/\b(zero|nil|debt[- ]free)\b/i, 0],
+  [/\bdouble[- ]digits?\b/i, 10],
+];
+
+/**
+ * Whether the guided value is written in the quote in a compatible unit. Direction is usually in words
+ * ("a decline of 5%", "net cash of ₹200 crore"), so values are compared by magnitude.
+ */
+function valueInQuote(value: number, unit: GuidanceItemInput["unit"], quote: string): boolean {
+  const v = Math.abs(value);
+  if (WORD_VALUES.some(([re, n]) => n === v && re.test(quote))) return true;
+  const guided: ExtractedNumber = {
+    raw: String(v),
+    value: v,
+    decimals: String(v).split(".")[1]?.length ?? 0,
+    dimension: UNIT_DIMENSION[unit],
+    rupees: unit === "inr_crore" ? v * 1e7 : null,
+    negative: false,
+  };
+  return numberSupported(guided, extractNumbers(quote).map((n) => ({ ...n, negative: false })));
+}
+
 /**
  * Extracts guidance from one transcript into the closed metric taxonomy. Items whose quote is not verbatim in
- * the cited chunk, whose horizon is unparseable, or whose horizon ended before the call are rejected.
+ * the cited chunk, whose horizon is unparseable or ended before the call, or whose guided numbers are not in
+ * the quote are rejected, as are repeats of an item already kept.
  */
 export async function extractGuidance(deps: { llm: LlmPort }, t: TranscriptForExtraction): Promise<{ items: GuidanceItemInput[]; stats: ExtractionStats }> {
   const stats: ExtractionStats = { proposed: 0, kept: 0, rejected: [] };
@@ -91,8 +119,16 @@ export async function extractGuidance(deps: { llm: LlmPort }, t: TranscriptForEx
         stats.rejected.push({ reason: "no numeric value", quote: raw.quote });
         continue;
       }
+      const missing = raw.withdrawn ? undefined : [bounds.low, bounds.high].find((v) => v !== null && !valueInQuote(v, raw.unit, raw.quote));
+      if (missing !== undefined) {
+        stats.rejected.push({ reason: `guided value ${missing} not in quote`, quote: raw.quote });
+        continue;
+      }
       const key = [raw.metric, period.label, raw.quote.trim()].join("|");
-      if (seen.has(key)) continue;
+      if (seen.has(key)) {
+        stats.rejected.push({ reason: `duplicate of ${raw.metric} ${period.label}`, quote: raw.quote });
+        continue;
+      }
       seen.add(key);
       const page = chunk.pages?.find((p) => quoteInText(raw.quote, p.text))?.page ?? chunk.pageStart;
       items.push({

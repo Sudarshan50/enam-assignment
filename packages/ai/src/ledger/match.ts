@@ -19,6 +19,8 @@ export interface LedgerItem {
   saidOn: string | null;
   documentId: string;
   withdrawn: boolean;
+  /** Order within the transcript (higher = said later); without it, input order breaks same-call ties. */
+  position?: number;
 }
 
 export interface TranscriptRef {
@@ -161,13 +163,27 @@ function sameSubject(a: LedgerItem, b: LedgerItem): boolean {
 
 const byDate = (a: LedgerItem, b: LedgerItem) => (a.saidOn ?? "").localeCompare(b.saidOn ?? "");
 
+const chronological = (a: LedgerItem, b: LedgerItem) =>
+  byDate(a, b) || (a.documentId === b.documentId && a.position !== undefined && b.position !== undefined ? a.position - b.position : 0);
+
+const sameBounds = (a: LedgerItem, b: LedgerItem) => a.low === b.low && a.high === b.high;
+
+/** The first statement, or the last correction to it made later in the same call. */
+function currentOnFirstDay(statements: readonly LedgerItem[]): { first: LedgerItem; current: LedgerItem } {
+  const first = statements[0]!;
+  let current = first;
+  for (const s of statements) if (s.saidOn === first.saidOn && !sameBounds(s, current)) current = s;
+  return { first, current };
+}
+
 function endOfDay(isoDate: string): number {
   return new Date(`${isoDate}T23:59:59+05:30`).getTime();
 }
 
 /**
  * Deterministic Promise Ledger. Statements about the same metric, horizon and scope are one promise; the
- * earliest explicit statement is the one judged (later revisions are noted, they do not reset the bar).
+ * earliest explicit statement is the one judged (later revisions are noted, they do not reset the bar), unless
+ * management corrected it later in the same call.
  */
 export function matchGuidance(input: MatchInput): LedgerEntry[] {
   const tolerance = input.pointTolerance ?? 0.1;
@@ -181,7 +197,7 @@ export function matchGuidance(input: MatchInput): LedgerEntry[] {
 
   const entries: LedgerEntry[] = [];
   for (const members of groups.values()) {
-    members.sort(byDate);
+    members.sort(chronological);
     const memberIds = members.map((m) => m.id);
     const statements = members.filter((m) => !m.withdrawn);
     const withdrawals = members.filter((m) => m.withdrawn);
@@ -193,11 +209,14 @@ export function matchGuidance(input: MatchInput): LedgerEntry[] {
       continue;
     }
 
-    const rep = statements.find((s) => s.statementType === "explicit_guidance") ?? statements[0]!;
+    const explicit = statements.filter((s) => s.statementType === "explicit_guidance");
+    const { first, current: rep } = currentOnFirstDay(explicit.length ? explicit : statements);
     const what = `${METRIC_LABEL[rep.metric]} of ${describeTarget(rep)} for ${rep.horizonLabel}${rep.segment ? ` (${rep.segment})` : ""}`;
-    const revisions = statements.filter((s) => s !== rep && (s.low !== rep.low || s.high !== rep.high) && (s.saidOn ?? "") > (rep.saidOn ?? ""));
-    const revisionNote = revisions.length ? ` Later revised to ${describeTarget(revisions[revisions.length - 1]!)} (${revisions[revisions.length - 1]!.saidIn}).` : "";
-    const withdrawal = withdrawals.find((w) => (w.saidOn ?? "") >= (rep.saidOn ?? ""));
+    const revisions = statements.filter((s) => s !== rep && !sameBounds(s, rep) && (s.saidOn ?? "") > (rep.saidOn ?? ""));
+    const correctionNote = rep !== first ? ` Corrected on the same call from ${describeTarget(first)}.` : "";
+    const revisionNote =
+      correctionNote + (revisions.length ? ` Later revised to ${describeTarget(revisions[revisions.length - 1]!)} (${revisions[revisions.length - 1]!.saidIn}).` : "");
+    const withdrawal = withdrawals.find((w) => chronological(w, rep) >= 0);
     const withdrawalNote = withdrawal ? ` Withdrawn by management in the ${withdrawal.saidIn}.` : "";
 
     if (rep.statementType !== "explicit_guidance") {

@@ -53,16 +53,72 @@ function squash(text: string): string {
   return text.replace(/\s+/g, "");
 }
 
-/** True when the quote (or each "..."-separated fragment of it) occurs in the source text. */
-export function quoteInText(quote: string, text: string): boolean {
-  const hay = normaliseForMatch(text);
-  const hayTight = squash(hay);
-  const fragments = normaliseForMatch(quote)
+/** Each fragment of an elided quote needs this many non-space characters or words, so "… 40% …" cannot match. */
+const MIN_FRAGMENT_CHARS = 12;
+const MIN_FRAGMENT_WORDS = 3;
+/** Most source text (non-space characters) an ellipsis may stand for. */
+const MAX_ELISION = 300;
+/** Context either side of a quoted fragment whose numbers may support the claim. */
+const NUMBER_WINDOW = 160;
+
+function fragmentsOf(quote: string): string[] {
+  return normaliseForMatch(quote)
     .split(/\s*(?:\.\.\.|\u2026)\s*/)
     .map((f) => f.replace(/^["']|["']$/g, "").trim())
-    .filter((f) => f.length > 0);
-  if (fragments.length === 0) return false;
-  return fragments.every((f) => hay.includes(f) || hayTight.includes(squash(f)));
+    .filter((f) => /[\p{L}\p{N}]/u.test(f));
+}
+
+function elisionTooShort(fragments: readonly string[]): boolean {
+  return fragments.length > 1 && fragments.some((f) => squash(f).length < MIN_FRAGMENT_CHARS && f.split(" ").length < MIN_FRAGMENT_WORDS);
+}
+
+interface QuoteMatch {
+  hay: string;
+  /** [start, end) of each fragment in `hay`. */
+  spans: [number, number][];
+}
+
+/** Finds the fragments in order, each starting within MAX_ELISION of the previous one's end. */
+function locateQuote(quote: string, text: string): QuoteMatch | null {
+  const fragments = fragmentsOf(quote);
+  if (fragments.length === 0 || elisionTooShort(fragments)) return null;
+  const hay = normaliseForMatch(text);
+  const pos: number[] = [];
+  let tight = "";
+  for (let i = 0; i < hay.length; i++) {
+    if (hay[i] === " ") continue;
+    tight += hay[i];
+    pos.push(i);
+  }
+  const needles = fragments.map(squash);
+  const spans: [number, number][] = [];
+  const find = (i: number, from: number, limit: number): boolean => {
+    const needle = needles[i];
+    if (needle === undefined) return true;
+    for (let at = tight.indexOf(needle, from); at !== -1 && at <= limit; at = tight.indexOf(needle, at + 1)) {
+      spans[i] = [at, at + needle.length];
+      if (find(i + 1, at + needle.length, at + needle.length + MAX_ELISION)) return true;
+    }
+    return false;
+  };
+  if (!find(0, 0, Infinity)) return null;
+  return { hay, spans: spans.map(([s, e]) => [pos[s]!, pos[e - 1]! + 1]) };
+}
+
+/** The quoted fragments plus a word-aligned window around each. */
+function quoteContext(m: QuoteMatch): string {
+  return m.spans
+    .map(([s, e]) => {
+      const from = m.hay.lastIndexOf(" ", Math.max(0, s - NUMBER_WINDOW)) + 1;
+      const to = m.hay.indexOf(" ", Math.min(m.hay.length, e + NUMBER_WINDOW));
+      return m.hay.slice(from, to === -1 ? m.hay.length : to);
+    })
+    .join("\n");
+}
+
+/** True when the quote occurs in the source text; "..."-separated fragments must be substantial, in order and close together. */
+export function quoteInText(quote: string, text: string): boolean {
+  return locateQuote(quote, text) !== null;
 }
 
 function pageOf(chunk: SourceChunk, quote: string): number {
@@ -75,7 +131,7 @@ export function checkClaim(claim: RawClaim, ctx: ValidationContext): ClaimCheck 
   const byId = new Map(ctx.chunks.map((c) => [c.chunkId, c] as const));
   const problems: string[] = [];
   const citations: Citation[] = [];
-  const citedTexts: string[] = [];
+  const quotedTexts: string[] = [];
 
   if (!claim.text.trim()) problems.push("claim text is empty");
   if (claim.citations.length === 0) problems.push("claim has no citation");
@@ -90,11 +146,16 @@ export function checkClaim(claim: RawClaim, ctx: ValidationContext): ClaimCheck 
       problems.push(`quote "${cit.quote}" is too short to verify`);
       continue;
     }
-    if (!quoteInText(cit.quote, chunk.text)) {
+    if (elisionTooShort(fragmentsOf(cit.quote))) {
+      problems.push(`quote "${cit.quote.slice(0, 120)}" joins fragments too short to verify; quote whole phrases`);
+      continue;
+    }
+    const match = locateQuote(cit.quote, chunk.text);
+    if (!match) {
       problems.push(`quote "${cit.quote.slice(0, 120)}" does not appear verbatim in chunk ${cit.chunkId}`);
       continue;
     }
-    citedTexts.push(chunk.text);
+    quotedTexts.push(quoteContext(match));
     citations.push({
       chunkId: chunk.chunkId,
       documentId: chunk.documentId,
@@ -106,7 +167,7 @@ export function checkClaim(claim: RawClaim, ctx: ValidationContext): ClaimCheck 
   }
 
   if (citations.length > 0) {
-    const sourceNumbers = citedTexts.flatMap(extractNumbers);
+    const sourceNumbers = quotedTexts.flatMap(extractNumbers);
     for (const n of extractNumbers(claim.text)) {
       if (isExemptNumber(n)) continue;
       if (!numberSupported(n, sourceNumbers, ctx.facts ?? [])) problems.push(`number "${n.raw}" is not in the cited sources`);
@@ -118,26 +179,64 @@ export function checkClaim(claim: RawClaim, ctx: ValidationContext): ClaimCheck 
   return { claim, ok: problems.length === 0, problems, citations };
 }
 
-/** One citation per chunk and page; distinct quotes from it are joined with an ellipsis, which quoteInText still verifies. */
-export function mergeCitations(citations: readonly Citation[]): Citation[] {
-  const merged = new Map<string, Citation>();
-  for (const c of citations) {
-    const key = `${c.chunkId}\u0000${c.page ?? ""}`;
-    const prev = merged.get(key);
-    if (!prev) {
-      merged.set(key, { ...c });
-      continue;
-    }
-    const a = normaliseForMatch(prev.quote);
-    const b = normaliseForMatch(c.quote);
-    if (a.includes(b)) continue;
-    prev.quote = b.includes(a) ? c.quote : `${prev.quote} … ${c.quote}`;
-  }
-  return [...merged.values()];
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+
+/** Whether `c` (with `beyond` one further out) continues a token that ends in `edge`: "1" in "15%", "2" in "1.2". */
+function continuesToken(edge: string, c: string | undefined, beyond: string | undefined): boolean {
+  if (c === undefined) return false;
+  return WORD_CHAR.test(c) || (/\d/.test(edge) && /[.,]/.test(c) && /\d/.test(beyond ?? ""));
 }
 
-function toClaim(check: ClaimCheck): Claim {
-  return { text: check.claim.text.trim(), citations: mergeCitations(check.citations), grounded: check.ok };
+/** `needle` occurs in `hay` as whole words/numbers, so "5%" is not inside "15%". */
+function containsPhrase(hay: string, needle: string): boolean {
+  if (!needle) return true;
+  const first = needle[0]!;
+  const last = needle[needle.length - 1]!;
+  for (let at = hay.indexOf(needle); at !== -1; at = hay.indexOf(needle, at + 1)) {
+    const end = at + needle.length;
+    const startOk = !WORD_CHAR.test(first) || !continuesToken(first, hay[at - 1], hay[at - 2]);
+    const endOk = !WORD_CHAR.test(last) || !continuesToken(last, hay[end], hay[end + 1]);
+    if (startOk && endOk) return true;
+  }
+  return false;
+}
+
+function joinQuotes(a: string, b: string, chunkText: string | undefined): string | null {
+  const forward = `${a} … ${b}`;
+  if (chunkText === undefined) return forward;
+  return [forward, `${b} … ${a}`].find((q) => quoteInText(q, chunkText)) ?? null;
+}
+
+/**
+ * One citation per chunk and page where possible; distinct quotes from it are joined with an ellipsis in text
+ * order. Given the chunk text, quotes are joined only when quoteInText still verifies the result.
+ */
+export function mergeCitations(citations: readonly Citation[], chunkText?: (chunkId: string) => string | undefined): Citation[] {
+  const groups = new Map<string, Citation[]>();
+  for (const c of citations) {
+    const key = `${c.chunkId}\u0000${c.page ?? ""}`;
+    const group = groups.get(key);
+    if (!group) {
+      groups.set(key, [{ ...c }]);
+      continue;
+    }
+    const b = normaliseForMatch(c.quote);
+    if (group.some((p) => containsPhrase(normaliseForMatch(p.quote), b))) continue;
+    const narrower = group.find((p) => containsPhrase(b, normaliseForMatch(p.quote)));
+    if (narrower) {
+      narrower.quote = c.quote;
+      continue;
+    }
+    const last = group[group.length - 1]!;
+    const joined = joinQuotes(last.quote, c.quote, chunkText?.(c.chunkId));
+    if (joined) last.quote = joined;
+    else group.push({ ...c });
+  }
+  return [...groups.values()].flat();
+}
+
+function toClaim(check: ClaimCheck, chunkText: (chunkId: string) => string | undefined): Claim {
+  return { text: check.claim.text.trim(), citations: mergeCitations(check.citations, chunkText), grounded: check.ok };
 }
 
 /**
@@ -161,5 +260,6 @@ export async function validateClaims(claims: RawClaim[], ctx: ValidationContext,
       if (recheck.ok) checks[i] = recheck;
     });
   }
-  return checks.map(toClaim);
+  const textById = new Map(ctx.chunks.map((c) => [c.chunkId, c.text] as const));
+  return checks.map((c) => toClaim(c, (id) => textById.get(id)));
 }

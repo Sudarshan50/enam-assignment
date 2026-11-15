@@ -209,11 +209,11 @@ describe("extractGuidance", () => {
   const base = { statementType: "explicit_guidance", scope: "consolidated", segment: null, speaker: "Rakesh Shah", withdrawn: false, unit: "pct" };
   const proposal = [
     { ...base, metric: "revenue_growth", bound: "range", low: 18, high: 15, horizon: "FY27", sourceId: "S1", quote: "We expect revenue growth of 15 to 18% for FY27." },
-    { ...base, metric: "capex", bound: "point", low: null, high: 450, unit: "inr_crore", horizon: "FY 2028", sourceId: "S1", quote: "Capex will be around 450 crore next year." },
+    { ...base, metric: "capex", bound: "point", low: null, high: 450, unit: "inr_crore", horizon: "FY 2028", sourceId: "S1", segment: "ignored", quote: "Capex will be around 450 crore next year." },
     { ...base, metric: "ebitda_margin", bound: "at_least", low: 16, high: null, horizon: "FY28", scope: "segment", segment: "Pipes", statementType: "target", sourceId: "S2", quote: "For the pipes segment we target EBITDA margin of at least 16% in FY28." },
     { ...base, metric: "volume_growth", bound: "point", low: 10, high: 10, horizon: "FY27", withdrawn: true, sourceId: "S2", quote: "We are withdrawing our FY27 volume guidance." },
-    { ...base, metric: "pat_growth", bound: "at_most", low: 9, high: null, horizon: "FY27", sourceId: "S1", segment: "ignored", quote: "We expect revenue growth of 15 to 18% for FY27." },
     // Rejections:
+    { ...base, metric: "pat_growth", bound: "at_most", low: 9, high: null, horizon: "FY27", sourceId: "S1", quote: "We expect revenue growth of 15 to 18% for FY27." },
     { ...base, metric: "revenue_growth", bound: "range", low: 15, high: 18, horizon: "FY27", sourceId: "S7", quote: "We expect revenue growth of 15 to 18% for FY27." },
     { ...base, metric: "revenue_growth", bound: "range", low: 20, high: 22, horizon: "FY27", sourceId: "S1", quote: "We expect revenue growth of 20 to 22% for FY27." },
     { ...base, metric: "revenue_growth", bound: "range", low: 15, high: 18, horizon: "medium term", sourceId: "S1", quote: "We expect revenue growth of 15 to 18% for FY27." },
@@ -226,25 +226,52 @@ describe("extractGuidance", () => {
   it("keeps verbatim, well-formed future guidance and explains every rejection", async () => {
     const llm = fakeLlm({ guidance_extract: () => ({ items: proposal }) });
     const { items, stats } = await extractGuidance({ llm }, transcript);
-    expect(stats).toMatchObject({ proposed: 11, kept: 5 });
+    expect(stats).toMatchObject({ proposed: 11, kept: 4 });
     expect(stats.rejected.map((r) => r.reason)).toEqual([
+      "guided value 9 not in quote",
       "unknown source S7",
       "quote not verbatim in source",
       "unrecognised horizon medium term",
       "horizon Q1 FY27 ended before the call",
       "no numeric value",
+      "duplicate of revenue_growth FY27",
     ]);
+    expect(stats.kept + stats.rejected.length).toBe(stats.proposed);
     expect(items.map((i) => [i.metric, i.low, i.high, i.horizonLabel])).toEqual([
       ["revenue_growth", 15, 18, "FY27"],
       ["capex", 450, 450, "FY28"],
       ["ebitda_margin", 16, null, "FY28"],
       ["volume_growth", 10, 10, "FY27"],
-      ["pat_growth", null, 9, "FY27"],
     ]);
     expect(items[0]).toMatchObject({ symbol: "ZTAX", documentId: "doc-1", chunkId: "chunk-1", page: 4, saidIn: "Q2 FY27 concall", saidOn: "2026-10-15", horizonStart: "2026-04-01", horizonEnd: "2027-03-31", extractorVersion: EXTRACTOR_VERSION, segment: null });
+    expect(items[1]!.segment).toBeNull();
     expect(items[2]).toMatchObject({ scope: "segment", segment: "Pipes", statementType: "target" });
     expect(items[3]!.withdrawn).toBe(true);
-    expect(items[4]!.segment).toBeNull();
+  });
+
+  it("requires each guided number in the quote, in a compatible unit and scale", async () => {
+    const c = chunk(
+      "chunk-n",
+      "Rakesh Shah, CFO: Revenue should grow 15% in FY27 while PAT grows faster. Capex will be ₹4.5 billion in FY28. Margins expand 150 bps in FY27. We aim to be net debt free by FY28. We expect double-digit volume growth in FY28.",
+    );
+    const items = [
+      { ...base, metric: "revenue_growth", bound: "point", low: 15, high: 15, horizon: "FY27", sourceId: "S1", quote: "Revenue should grow 15% in FY27 while PAT grows faster." },
+      { ...base, metric: "pat_growth", bound: "range", low: 15, high: 18, horizon: "FY27", sourceId: "S1", quote: "Revenue should grow 15% in FY27 while PAT grows faster." },
+      { ...base, metric: "capex", bound: "point", low: 450, high: 450, unit: "inr_crore", horizon: "FY28", sourceId: "S1", quote: "Capex will be ₹4.5 billion in FY28." },
+      { ...base, metric: "capex", bound: "point", low: 4.5, high: 4.5, unit: "inr_crore", horizon: "FY28", sourceId: "S1", quote: "Capex will be ₹4.5 billion in FY28." },
+      { ...base, metric: "ebitda_margin", bound: "point", low: 150, high: 150, horizon: "FY27", sourceId: "S1", quote: "Margins expand 150 bps in FY27." },
+      { ...base, metric: "net_debt", bound: "at_most", low: null, high: 0, unit: "inr_crore", horizon: "FY28", sourceId: "S1", quote: "We aim to be net debt free by FY28." },
+      { ...base, metric: "volume_growth", bound: "at_least", low: 10, high: null, horizon: "FY28", sourceId: "S1", quote: "We expect double-digit volume growth in FY28." },
+    ];
+    const llm = fakeLlm({ guidance_extract: () => ({ items }) });
+    const { items: kept, stats } = await extractGuidance({ llm }, { ...transcript, chunks: [c] });
+    expect(kept.map((i) => [i.metric, i.low, i.high])).toEqual([
+      ["revenue_growth", 15, 15],
+      ["capex", 450, 450],
+      ["net_debt", null, 0],
+      ["volume_growth", 10, null],
+    ]);
+    expect(stats.rejected.map((r) => r.reason)).toEqual(["guided value 18 not in quote", "guided value 4.5 not in quote", "guided value 150 not in quote"]);
   });
 
   it("wraps transcript text as untrusted sources and tags the call with the document", async () => {

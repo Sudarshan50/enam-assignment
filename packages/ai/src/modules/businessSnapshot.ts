@@ -50,7 +50,7 @@ export const businessSnapshotModule: ResearchModuleRunner = {
         // A revenue share is shown only if that percentage literally appears in the segment's cited sources.
         const cited = claim.citations.flatMap((c) => extractNumbers(textById.get(c.chunkId) ?? ""));
         const share =
-          s.sharePct !== null && claim.grounded && numberSupported({ raw: `${s.sharePct}%`, value: s.sharePct, decimals: String(s.sharePct).split(".")[1]?.length ?? 0, dimension: "pct", rupees: null }, cited)
+          s.sharePct !== null && claim.grounded && numberSupported({ raw: `${s.sharePct}%`, value: s.sharePct, decimals: String(s.sharePct).split(".")[1]?.length ?? 0, dimension: "pct", rupees: null, negative: false }, cited)
             ? s.sharePct
             : null;
         return { name: s.name, sharePct: share, claim };

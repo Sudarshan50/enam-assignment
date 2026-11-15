@@ -3,7 +3,7 @@ import { documentsRepo } from "@finn/db/repositories/documents";
 import { guidanceRepo, type GuidanceItemRow } from "@finn/db/repositories/guidance";
 import { PromiseLedgerPayloadSchema, type GuidanceMetric, type PromiseItem } from "@finn/shared/contracts/research";
 import type { z } from "zod";
-import type { SourceChunk } from "../citations/validator";
+import { normaliseForMatch, type SourceChunk } from "../citations/validator";
 import { createHistoryActuals } from "../ledger/actuals";
 import { extractGuidance } from "../ledger/extract";
 import { matchGuidance, summariseLedger, type LedgerItem } from "../ledger/match";
@@ -17,7 +17,11 @@ export const MAX_TRANSCRIPTS = 8;
 
 const iso = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
-function toLedgerItem(r: GuidanceItemRow): LedgerItem {
+/** Chunk index first, then the quote's offset in the chunk; chunks are far shorter than this. */
+const CHUNK_STRIDE = 1_000_000;
+
+function toLedgerItem(r: GuidanceItemRow, chunkById: ReadonlyMap<string, { index: number; text: string }>): LedgerItem {
+  const chunk = r.chunk_id ? chunkById.get(r.chunk_id) : undefined;
   return {
     id: r.id,
     metric: r.metric as GuidanceMetric,
@@ -33,6 +37,7 @@ function toLedgerItem(r: GuidanceItemRow): LedgerItem {
     saidOn: iso(r.said_on),
     documentId: r.document_id,
     withdrawn: r.withdrawn,
+    position: chunk ? chunk.index * CHUNK_STRIDE + Math.max(0, normaliseForMatch(chunk.text).indexOf(normaliseForMatch(r.quote))) : undefined,
   };
 }
 
@@ -50,9 +55,11 @@ export const promiseLedgerModule: ResearchModuleRunner = {
     const chunks = chunksRepo(ctx.sql);
     const docs = documentsRepo(ctx.sql);
     const guidance = guidanceRepo(ctx.sql);
+    const chunkById = new Map<string, { index: number; text: string }>();
 
     await mapWithConcurrency(transcripts, 4, async (t) => {
       const [rows, pages] = await Promise.all([chunks.listForDocument(t.id), docs.pages(t.id)]);
+      for (const c of rows) chunkById.set(c.id, { index: c.chunk_index, text: c.text });
       const sourceChunks: SourceChunk[] = rows.map((c) => ({
         chunkId: c.id,
         documentId: t.id,
@@ -75,7 +82,7 @@ export const promiseLedgerModule: ResearchModuleRunner = {
     const rows = (await guidance.listBySymbol(ctx.symbol)).filter((r) => transcriptIds.has(r.document_id));
     const rowById = new Map(rows.map((r) => [r.id, r] as const));
     const entries = matchGuidance({
-      items: rows.map(toLedgerItem),
+      items: rows.map((r) => toLedgerItem(r, chunkById)),
       transcripts: transcripts.map((t) => ({ documentId: t.id, label: t.label, callDate: t.periodEnd })),
       actuals: createHistoryActuals(ctx.history),
       asOf: ctx.asOf,

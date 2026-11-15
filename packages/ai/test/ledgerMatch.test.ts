@@ -209,6 +209,60 @@ describe("matchGuidance", () => {
     expect(e!.explanation).toMatch(/Later revised to 14%–16% \(Q2 FY26 concall\)/);
   });
 
+  it("a correction later in the same call supersedes the first figure", () => {
+    const said = { metric: "revenue_growth", horizonLabel: "FY26", saidOn: "2025-08-01" } as const;
+    const first = item({ ...said, id: "first", low: 12, high: 16, position: 100 });
+    const corrected = item({ ...said, id: "corrected", low: 18, high: 20, position: 2_000_100 });
+    for (const items of [
+      [first, corrected],
+      [corrected, first],
+    ]) {
+      const entries = run(items);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toMatchObject({ verdict: "missed", memberIds: ["first", "corrected"] });
+      expect(entries[0]!.representative.id).toBe("corrected");
+      expect(entries[0]!.explanation).toMatch(/Corrected on the same call from 12%–16%/);
+    }
+  });
+
+  it("without positions, input order decides which same-day statement is later", () => {
+    const said = { metric: "revenue_growth", horizonLabel: "FY26", saidOn: "2025-08-01" } as const;
+    const [e] = run([item({ ...said, id: "a", low: 18, high: 20 }), item({ ...said, id: "b", low: 12, high: 16 })]);
+    expect(e).toMatchObject({ verdict: "delivered", representative: { id: "b" } });
+  });
+
+  it("a same-day repeat of the same figure keeps the first statement", () => {
+    const said = { metric: "capex", unit: "inr_crore", horizonLabel: "FY27", low: 500, high: 500, documentId: "t-q2fy27" } as const;
+    const [e] = run([item({ ...said, id: "a", position: 1 }), item({ ...said, id: "b", position: 2 })]);
+    expect(e!.representative.id).toBe("a");
+    expect(e!.explanation).not.toMatch(/Corrected/);
+  });
+
+  it("a withdrawal earlier in the same call does not cancel a restatement after it", () => {
+    const said = { metric: "volume_growth", horizonLabel: "FY27", low: 10, high: 10, documentId: "t-q2fy27" } as const;
+    const restated = run([item({ ...said, id: "w", withdrawn: true, position: 1 }), item({ ...said, id: "s", position: 2 })]);
+    expect(restated[0]).toMatchObject({ verdict: "pending", representative: { id: "s" } });
+    const withdrawn = run([item({ ...said, id: "s", position: 1 }), item({ ...said, id: "w", withdrawn: true, position: 2 })]);
+    expect(withdrawn[0]!.verdict).toBe("not_scored");
+  });
+
+  it("summary counts cover every promise exactly once when corrections are grouped", () => {
+    const entries = run([
+      item({ metric: "revenue_growth", horizonLabel: "FY26", low: 12, high: 16, saidOn: "2025-08-01", position: 1 }),
+      item({ metric: "revenue_growth", horizonLabel: "FY26", low: 18, high: 20, saidOn: "2025-08-01", position: 2 }),
+      item({ metric: "pat_growth", horizonLabel: "FY26", low: 9, high: 11, saidOn: "2025-08-01" }),
+      item({ metric: "ebitda_margin", horizonLabel: "FY27", low: 24, high: 24, documentId: "t-q4fy26" }),
+      item({ metric: "ebitda_margin", horizonLabel: "FY27", low: 25, high: 25, documentId: "t-q4fy26" }),
+      item({ metric: "revenue_growth", horizonLabel: "FY27", low: 15, high: 18, documentId: "t-q2fy27" }),
+      item({ metric: "pat_growth", horizonLabel: "FY28", low: 25, high: null, statementType: "target" }),
+    ]);
+    const s = summariseLedger(entries);
+    expect(s).toEqual({ elapsed: 2, delivered: 1, missed: 1, pending: 1, quietlyDropped: 1, notScored: 1 });
+    expect(s.delivered + s.missed).toBe(s.elapsed);
+    expect(s.elapsed + s.pending + s.quietlyDropped + s.notScored).toBe(entries.length);
+    expect(entries.flatMap((e) => e.memberIds)).toHaveLength(7);
+  });
+
   it("not scored: metric not computable, targets and aspirations, unknown horizons", () => {
     const entries = run([
       item({ metric: "order_book", unit: "inr_crore", horizonLabel: "FY26", low: 5000, high: 5000, saidOn: "2025-05-01" }),

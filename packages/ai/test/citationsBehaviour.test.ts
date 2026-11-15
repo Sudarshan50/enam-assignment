@@ -2,7 +2,7 @@ import { ClaimSchema } from "@finn/shared/contracts/research";
 import { describe, expect, it } from "vitest";
 import { groundClaims } from "../src/citations/ground";
 import { extractNumbers, isExemptNumber, numberSupported } from "../src/citations/numbers";
-import { checkClaim, quoteInText, validateClaims, type SourceChunk } from "../src/citations/validator";
+import { checkClaim, mergeCitations, quoteInText, validateClaims, type SourceChunk } from "../src/citations/validator";
 import { buildSourcesBlock } from "../src/prompts/sources";
 import { fakeLlm } from "./helpers/fakes";
 
@@ -99,6 +99,143 @@ describe("number grounding", () => {
 
   it("classifies bps and multiples", () => {
     expect(extractNumbers("up 120 bps, 2.5x leverage, 3 times cover").map((n) => n.dimension)).toEqual(["bps", "multiple", "multiple"]);
+  });
+});
+
+describe("number units, scale and sign", () => {
+  const supports = (claimed: string, source: string) => numberSupported(extractNumbers(claimed)[0]!, extractNumbers(source));
+
+  it("compares money after scaling, never as bare digits", () => {
+    expect(supports("₹100 lakh", "₹100 crore")).toBe(false);
+    expect(supports("₹100 crore", "₹100 lakh")).toBe(false);
+    expect(supports("₹100 crore", "Rs 100 mn")).toBe(false);
+    expect(supports("₹1 crore", "₹100 lakh")).toBe(true);
+    expect(supports("₹5 thousand", "₹0.05 lakh")).toBe(true);
+    expect(supports("₹5 thousand", "₹5 lakh")).toBe(false);
+  });
+
+  it("treats basis points as hundredths of a percent", () => {
+    expect(supports("100 bps", "100%")).toBe(false);
+    expect(supports("100%", "100 bps")).toBe(false);
+    expect(supports("1%", "100 bps")).toBe(true);
+    expect(supports("125 basis points", "margin up 1.25%")).toBe(true);
+  });
+
+  it("never matches figures of different dimensions", () => {
+    expect(supports("₹15 crore", "15%")).toBe(false);
+    expect(supports("15%", "₹15")).toBe(false);
+    expect(supports("2.5x", "2.5%")).toBe(false);
+  });
+
+  it("still compares a figure without a unit or scale as written", () => {
+    expect(supports("₹450 crore", "Capex 450")).toBe(true);
+    expect(supports("450", "Rs 450 Cr")).toBe(true);
+    expect(supports("₹1,234 crore", "Revenue (₹) 1,234")).toBe(true);
+  });
+
+  it("reads minus signs, bare parenthesised figures and losses as negative", () => {
+    const flags = (t: string) => extractNumbers(t).map((n) => n.negative);
+    expect(flags("growth of -5% and −3.2%, 21-22% margin, FY26-27")).toEqual([true, true, false, false, false]);
+    expect(flags("PAT (1,234.5) vs (₹50 crore) and (18%)")).toEqual([true, false, false]);
+    expect(flags("net loss of ₹50 crore; ₹20 crore loss; loss stood at 12")).toEqual([true, true, true]);
+    expect(flags("Profit/(Loss) before tax 1,234; loss ratio 12%")).toEqual([false, false]);
+  });
+
+  it("does not let a loss support a positive figure, or the reverse", () => {
+    expect(supports("profit of ₹50 crore", "net loss of ₹50 crore")).toBe(false);
+    expect(supports("a loss of ₹50 crore", "net profit of ₹50 crore")).toBe(false);
+    expect(supports("a loss of ₹1,234 crore", "PAT (1,234)")).toBe(true);
+    expect(supports("growth of 5%", "growth of -5%")).toBe(false);
+    expect(supports("-5%", "growth of -5%")).toBe(true);
+  });
+
+  it("rejects a claim whose figure is in the quote with the wrong scale", () => {
+    const chunk: SourceChunk = { ...mine, chunkId: "zta-c2", text: "Exports for the year were ₹100 lakh, a record for the unit." };
+    const r = checkClaim(claim("Exports were ₹100 crore.", "Exports for the year were ₹100 lakh", "zta-c2"), { chunks: [chunk] });
+    expect(r.problems).toEqual(['number "₹100 crore" is not in the cited sources']);
+  });
+});
+
+describe("elided quotes", () => {
+  const filler = "The board also reviewed routine governance matters and approved the minutes of the previous meeting. ";
+  const far: SourceChunk = {
+    ...mine,
+    chunkId: "zta-c3",
+    text: `Revenue grew steadily across all regions this year. ${filler.repeat(10)}EBITDA margin expanded to 40% on cost savings.`,
+  };
+  const near: SourceChunk = {
+    ...mine,
+    chunkId: "zta-c4",
+    text: "Revenue grew steadily across all regions this year, reaching ₹1,000 crore. EBITDA margin expanded to 21% on cost savings.",
+  };
+
+  it("requires each fragment to be substantial", () => {
+    expect(quoteInText("Revenue grew … 40%", far.text)).toBe(false);
+    expect(quoteInText("Revenue grew steadily … margin expanded to 21%", near.text)).toBe(true);
+    const r = checkClaim(claim("Revenue grew 40%.", "Revenue grew ... 40%", "zta-c3"), { chunks: [far] });
+    expect(r.ok).toBe(false);
+    expect(r.problems[0]).toMatch(/too short to verify/);
+  });
+
+  it("requires fragments in source order", () => {
+    expect(quoteInText("EBITDA margin expanded to 21% … Revenue grew steadily across", near.text)).toBe(false);
+    expect(quoteInText("Revenue grew steadily across … EBITDA margin expanded to 21%", near.text)).toBe(true);
+  });
+
+  it("bounds how much text an ellipsis may skip", () => {
+    expect(quoteInText("Revenue grew steadily across all regions … EBITDA margin expanded to 40%", far.text)).toBe(false);
+  });
+
+  it("checks claim numbers against the quote's neighbourhood, not the whole chunk", () => {
+    const r = checkClaim(claim("Revenue grew 40%.", "Revenue grew steadily across all regions this year", "zta-c3"), { chunks: [far] });
+    expect(r.problems).toEqual(['number "40%" is not in the cited sources']);
+    const ok = checkClaim(claim("Revenue reached ₹1,000 crore with a 21% margin.", "Revenue grew steadily across all regions this year", "zta-c4"), { chunks: [near] });
+    expect(ok.ok).toBe(true);
+  });
+});
+
+describe("mergeCitations dedupe", () => {
+  const base = { chunkId: "zta-c1", documentId: "zta-d1", documentLabel: "Q2 FY27 concall", url: null, page: 5 };
+
+  it("does not drop a quote that is only a numeric suffix of another", () => {
+    const out = mergeCitations([
+      { ...base, quote: "Revenue grew 15% in FY27" },
+      { ...base, quote: "5% in FY27" },
+      { ...base, quote: "order book of 1.2 lakh crore" },
+      { ...base, quote: "2 lakh crore" },
+    ]);
+    expect(out.map((c) => c.quote)).toEqual(["Revenue grew 15% in FY27 … 5% in FY27 … order book of 1.2 lakh crore … 2 lakh crore"]);
+  });
+
+  it("still drops a quote contained as whole words", () => {
+    const out = mergeCitations([
+      { ...base, quote: "Revenue grew 15% in FY27" },
+      { ...base, quote: "grew 15%" },
+    ]);
+    expect(out.map((c) => c.quote)).toEqual(["Revenue grew 15% in FY27"]);
+  });
+
+  it("joins in source order and keeps unjoinable quotes as separate citations", () => {
+    const text = (id: string) => (id === "zta-c1" ? mine.text : undefined);
+    const ordered = mergeCitations(
+      [
+        { ...base, quote: "EBITDA margin was 18.6%" },
+        { ...base, quote: "Revenue for the quarter was ₹1,000 crore" },
+      ],
+      text,
+    );
+    expect(ordered.map((c) => c.quote)).toEqual(["Revenue for the quarter was ₹1,000 crore … EBITDA margin was 18.6%"]);
+    expect(quoteInText(ordered[0]!.quote, mine.text)).toBe(true);
+
+    const farText = `Revenue for the quarter was ₹1,000 crore. ${"Routine governance matters were discussed at length. ".repeat(10)}EBITDA margin was 18.6%.`;
+    const separate = mergeCitations(
+      [
+        { ...base, quote: "Revenue for the quarter was ₹1,000 crore" },
+        { ...base, quote: "EBITDA margin was 18.6%" },
+      ],
+      () => farText,
+    );
+    expect(separate.map((c) => c.quote)).toEqual(["Revenue for the quarter was ₹1,000 crore", "EBITDA margin was 18.6%"]);
   });
 });
 
